@@ -12,7 +12,7 @@ USERDIR = $(SRCDIR)/user
 EXECUTABLE = pactopus
 
 # Version
-VERSION = 0.1.1
+VERSION = 0.1.3
 
 # Default target
 all: check

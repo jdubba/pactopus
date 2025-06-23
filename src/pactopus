@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 
 # Pactopus - Cross-distribution personal package management DSC tool
-# Version: 0.1.0
+# Version: 0.1.1
 
 set -euo pipefail
 
 # Global variables
-readonly PACTOPUS_VERSION="0.1.0"
+readonly PACTOPUS_VERSION="0.1.1"
 readonly SCRIPT_NAME=$(basename "$0")
 
 # Print version information

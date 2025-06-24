@@ -1,0 +1,109 @@
+---
+# Gawk Removal Playbook
+# Cross-distribution gawk removal with package name mapping
+# Supports: Debian/Ubuntu, RHEL/Fedora/CentOS, Arch, SUSE, Alpine
+
+- name: Remove Gawk across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Package name mappings for different distributions
+    gawk_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.)
+      Debian: gawk
+      Ubuntu: gawk
+      "Pop!_OS": gawk
+      "Linux Mint": gawk
+      elementary: gawk
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: gawk
+      Fedora: gawk
+      CentOS: gawk
+      Rocky: gawk
+      AlmaLinux: gawk
+      # Arch family
+      Archlinux: gawk
+      Manjaro: gawk
+      # SUSE family
+      openSUSE: gawk
+      SLES: gawk
+      # Alpine
+      Alpine: gawk
+
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+      
+    - name: Check if gawk is currently installed
+      command: gawk --version
+      register: gawk_version_check
+      failed_when: false
+      changed_when: false
+      
+    - name: Display current gawk version if installed
+      debug:
+        msg: "Gawk is currently installed: {{ gawk_version_check.stdout | regex_replace('\\n.*', '') }}"
+      when: gawk_version_check.rc == 0
+      
+    - name: Skip removal if gawk is not installed
+      debug:
+        msg: "Gawk is not installed, nothing to remove"
+      when: gawk_version_check.rc != 0
+      
+    - name: Remove gawk (Debian/Ubuntu)
+      apt:
+        name: "{{ gawk_packages[ansible_distribution] | default('gawk') }}"
+        state: absent
+      when: ansible_os_family == "Debian" and gawk_version_check.rc == 0
+      
+    - name: Remove gawk (RHEL/Fedora/CentOS)
+      dnf:
+        name: "{{ gawk_packages[ansible_distribution] | default('gawk') }}"
+        state: absent
+      when: ansible_os_family == "RedHat" and gawk_version_check.rc == 0
+      ignore_errors: yes
+      
+    - name: Remove gawk (RHEL/CentOS with yum fallback)
+      yum:
+        name: "{{ gawk_packages[ansible_distribution] | default('gawk') }}"
+        state: absent
+      when: ansible_os_family == "RedHat" and gawk_version_check.rc == 0 and ansible_distribution_major_version|int < 8
+      ignore_errors: yes
+      
+    - name: Remove gawk (Arch Linux)
+      pacman:
+        name: "{{ gawk_packages[ansible_distribution] | default('gawk') }}"
+        state: absent
+      when: ansible_os_family == "Archlinux" and gawk_version_check.rc == 0
+      
+    - name: Remove gawk (SUSE)
+      zypper:
+        name: "{{ gawk_packages[ansible_distribution] | default('gawk') }}"
+        state: absent
+      when: ansible_os_family == "Suse" and gawk_version_check.rc == 0
+      
+    - name: Remove gawk (Alpine)
+      apk:
+        name: "{{ gawk_packages[ansible_distribution] | default('gawk') }}"
+        state: absent
+      when: ansible_os_family == "Alpine" and gawk_version_check.rc == 0
+      
+    - name: Verify gawk removal
+      command: gawk --version
+      register: gawk_removal_check
+      failed_when: false
+      changed_when: false
+      
+    - name: Display removal success
+      debug:
+        msg: "Gawk has been successfully removed"
+      when: gawk_removal_check.rc != 0
+      
+    - name: Display removal warning if still present
+      debug:
+        msg: "Warning: Gawk may still be present on the system"
+      when: gawk_removal_check.rc == 0

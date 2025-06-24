@@ -1,0 +1,200 @@
+---
+# Gawk Installation Playbook
+# Cross-distribution gawk installation with package name mapping
+# Supports: Debian/Ubuntu, RHEL/Fedora/CentOS, Arch, SUSE, Alpine
+
+- name: Install Gawk across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Package name mappings for different distributions
+    gawk_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.)
+      Debian: gawk
+      Ubuntu: gawk
+      "Pop!_OS": gawk
+      "Linux Mint": gawk
+      elementary: gawk
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: gawk
+      Fedora: gawk
+      CentOS: gawk
+      Rocky: gawk
+      AlmaLinux: gawk
+      # Arch family
+      Archlinux: gawk
+      Manjaro: gawk
+      # SUSE family
+      openSUSE: gawk
+      SLES: gawk
+      # Alpine
+      Alpine: gawk
+    
+    # Rolling release distributions (prefer native packages)
+    rolling_distributions:
+      - Archlinux
+      - Manjaro
+      - Fedora
+      - openSUSE Tumbleweed
+    
+    # Stable distributions (prefer newer sources)
+    stable_distributions:
+      - Debian
+      - Ubuntu
+      - "Pop!_OS"
+      - "Linux Mint"
+      - elementary
+      - RedHat
+      - CentOS
+      - Rocky
+      - AlmaLinux
+      - "Amazon Linux"
+      - Alpine
+      - SLES
+      - "openSUSE Leap"
+    
+    # Ubuntu-based distributions that should use Ubuntu repositories
+    ubuntu_derivatives:
+      - Ubuntu
+      - "Pop!_OS"
+      - "Linux Mint"
+      - elementary
+
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Determine if distribution is rolling or stable
+      set_fact:
+        is_rolling_distribution: "{{ ansible_distribution in rolling_distributions }}"
+        is_stable_distribution: "{{ ansible_distribution in stable_distributions }}"
+
+    - name: Display distribution type
+      debug:
+        msg: "Distribution type: {{ 'Rolling' if is_rolling_distribution else 'Stable' }}"
+
+    # Enable EPEL for RHEL family stable distributions
+    - name: Enable EPEL repository (RHEL family)
+      dnf:
+        name: epel-release
+        state: present
+      when: ansible_os_family == "RedHat" and is_stable_distribution and ansible_distribution != "Fedora"
+      ignore_errors: yes
+
+    - name: Ensure package cache is updated (Debian/Ubuntu)
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+      
+    - name: Ensure package cache is updated (RHEL/Fedora)
+      dnf:
+        update_cache: yes
+      when: ansible_os_family == "RedHat"
+      ignore_errors: yes
+      
+    - name: Ensure package cache is updated (RHEL/CentOS with yum)
+      yum:
+        update_cache: yes
+      when: ansible_os_family == "RedHat" and ansible_distribution_major_version|int < 8
+      ignore_errors: yes
+      
+    - name: Ensure package cache is updated (Arch)
+      pacman:
+        update_cache: yes
+      when: ansible_os_family == "Archlinux"
+      
+    - name: Ensure package cache is updated (SUSE)
+      zypper:
+        update_cache: yes
+      when: ansible_os_family == "Suse"
+      
+    - name: Ensure package cache is updated (Alpine)
+      apk:
+        update_cache: yes
+      when: ansible_os_family == "Alpine"
+      
+    - name: Check if gawk is already installed
+      command: gawk --version
+      register: gawk_version_check
+      failed_when: false
+      changed_when: false
+      
+    - name: Display current gawk version if installed
+      debug:
+        msg: "Gawk is already installed: {{ gawk_version_check.stdout | regex_replace('\\n.*', '') }}"
+      when: gawk_version_check.rc == 0
+      
+    - name: Install/upgrade gawk (Debian/Ubuntu and derivatives)
+      apt:
+        name: "{{ gawk_packages[ansible_distribution] | default('gawk') }}"
+        state: latest
+      when: ansible_os_family == "Debian"
+      
+    - name: Install/upgrade gawk (RHEL/Fedora/CentOS stable with EPEL)
+      dnf:
+        name: "{{ gawk_packages[ansible_distribution] | default('gawk') }}"
+        state: latest
+        enablerepo: epel
+      when: ansible_os_family == "RedHat" and is_stable_distribution and ansible_distribution != "Fedora"
+      ignore_errors: yes
+      
+    - name: Install/upgrade gawk (Fedora rolling)
+      dnf:
+        name: "{{ gawk_packages[ansible_distribution] | default('gawk') }}"
+        state: latest
+      when: ansible_os_family == "RedHat" and ansible_distribution == "Fedora"
+      ignore_errors: yes
+      
+    - name: Install/upgrade gawk (RHEL/CentOS with yum fallback)
+      yum:
+        name: "{{ gawk_packages[ansible_distribution] | default('gawk') }}"
+        state: latest
+        enablerepo: epel
+      when: ansible_os_family == "RedHat" and is_stable_distribution and ansible_distribution_major_version|int < 8
+      ignore_errors: yes
+      
+    - name: Install/upgrade gawk (Arch Linux)
+      pacman:
+        name: "{{ gawk_packages[ansible_distribution] | default('gawk') }}"
+        state: latest
+      when: ansible_os_family == "Archlinux"
+      
+    - name: Install/upgrade gawk (SUSE)
+      zypper:
+        name: "{{ gawk_packages[ansible_distribution] | default('gawk') }}"
+        state: latest
+      when: ansible_os_family == "Suse"
+      
+    - name: Install/upgrade gawk (Alpine)
+      apk:
+        name: "{{ gawk_packages[ansible_distribution] | default('gawk') }}"
+        state: latest
+      when: ansible_os_family == "Alpine"
+      
+    - name: Verify gawk installation
+      command: gawk --version
+      register: gawk_final_version
+      changed_when: false
+      
+    - name: Display final gawk version
+      debug:
+        msg: "Gawk installation complete: {{ gawk_final_version.stdout | regex_replace('\\n.*', '') }}"
+        
+    - name: Ensure gawk is in PATH
+      shell: which gawk
+      register: gawk_path
+      changed_when: false
+      
+    - name: Display gawk binary location
+      debug:
+        msg: "Gawk binary location: {{ gawk_path.stdout }}"
+
+  handlers:
+    - name: refresh package cache
+      package:
+        update_cache: yes

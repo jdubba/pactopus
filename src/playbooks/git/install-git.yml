@@ -152,66 +152,66 @@
         msg: "Git is already installed: {{ git_version_check.stdout }}"
       when: git_version_check.rc == 0
       
-    - name: Install git from backports (Debian stable)
+    - name: Install/upgrade git from backports (Debian stable)
       apt:
         name: "{{ git_packages[ansible_distribution] | default('git') }}"
-        state: present
+        state: latest
         default_release: "{{ ansible_distribution_release }}-backports"
-      when: ansible_os_family == "Debian" and ansible_distribution == "Debian" and is_stable_distribution and git_version_check.rc != 0
+      when: ansible_os_family == "Debian" and ansible_distribution == "Debian" and is_stable_distribution
       ignore_errors: yes
       
-    - name: Install git from PPA (Ubuntu and derivatives stable) 
+    - name: Install/upgrade git from PPA (Ubuntu and derivatives stable) 
       apt:
         name: "{{ git_packages[ansible_distribution] | default('git') }}"
-        state: present
-      when: ansible_os_family == "Debian" and ansible_distribution in ubuntu_derivatives and is_stable_distribution and git_version_check.rc != 0
+        state: latest
+      when: ansible_os_family == "Debian" and ansible_distribution in ubuntu_derivatives and is_stable_distribution
       
-    - name: Install git (Debian/Ubuntu rolling or fallback)
+    - name: Install/upgrade git (Debian/Ubuntu rolling or fallback)
       apt:
         name: "{{ git_packages[ansible_distribution] | default('git') }}"
-        state: present
-      when: ansible_os_family == "Debian" and git_version_check.rc != 0 and (is_rolling_distribution or ansible_failed_result is defined)
+        state: latest
+      when: ansible_os_family == "Debian" and (is_rolling_distribution or ansible_failed_result is defined)
       
-    - name: Install git (RHEL/Fedora/CentOS stable with EPEL)
+    - name: Install/upgrade git (RHEL/Fedora/CentOS stable with EPEL)
       dnf:
         name: "{{ git_packages[ansible_distribution] | default('git') }}"
-        state: present
+        state: latest
         enablerepo: epel
-      when: ansible_os_family == "RedHat" and is_stable_distribution and ansible_distribution != "Fedora" and git_version_check.rc != 0
+      when: ansible_os_family == "RedHat" and is_stable_distribution and ansible_distribution != "Fedora"
       ignore_errors: yes
       
-    - name: Install git (Fedora rolling)
+    - name: Install/upgrade git (Fedora rolling)
       dnf:
         name: "{{ git_packages[ansible_distribution] | default('git') }}"
-        state: present
-      when: ansible_os_family == "RedHat" and ansible_distribution == "Fedora" and git_version_check.rc != 0
+        state: latest
+      when: ansible_os_family == "RedHat" and ansible_distribution == "Fedora"
       ignore_errors: yes
       
-    - name: Install git (RHEL/CentOS with yum fallback)
+    - name: Install/upgrade git (RHEL/CentOS with yum fallback)
       yum:
         name: "{{ git_packages[ansible_distribution] | default('git') }}"
-        state: present
+        state: latest
         enablerepo: epel
-      when: ansible_os_family == "RedHat" and is_stable_distribution and git_version_check.rc != 0 and ansible_distribution_major_version|int < 8
+      when: ansible_os_family == "RedHat" and is_stable_distribution and ansible_distribution_major_version|int < 8
       ignore_errors: yes
       
-    - name: Install git (Arch Linux)
+    - name: Install/upgrade git (Arch Linux)
       pacman:
         name: "{{ git_packages[ansible_distribution] | default('git') }}"
-        state: present
-      when: ansible_os_family == "Archlinux" and git_version_check.rc != 0
+        state: latest
+      when: ansible_os_family == "Archlinux"
       
-    - name: Install git (SUSE)
+    - name: Install/upgrade git (SUSE)
       zypper:
         name: "{{ git_packages[ansible_distribution] | default('git') }}"
-        state: present
-      when: ansible_os_family == "Suse" and git_version_check.rc != 0
+        state: latest
+      when: ansible_os_family == "Suse"
       
-    - name: Install git (Alpine)
+    - name: Install/upgrade git (Alpine)
       apk:
         name: "{{ git_packages[ansible_distribution] | default('git') }}"
-        state: present
-      when: ansible_os_family == "Alpine" and git_version_check.rc != 0
+        state: latest
+      when: ansible_os_family == "Alpine"
       
     - name: Verify git installation
       command: git --version

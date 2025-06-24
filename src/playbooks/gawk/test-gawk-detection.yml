@@ -1,0 +1,141 @@
+---
+# Gawk Detection Test Playbook
+# Tests gawk installation detection across distributions
+# Useful for debugging package management issues
+
+- name: Test Gawk Detection across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: no
+  
+  vars:
+    # Package name mappings for different distributions
+    gawk_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.)
+      Debian: gawk
+      Ubuntu: gawk
+      "Pop!_OS": gawk
+      "Linux Mint": gawk
+      elementary: gawk
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: gawk
+      Fedora: gawk
+      CentOS: gawk
+      Rocky: gawk
+      AlmaLinux: gawk
+      # Arch family
+      Archlinux: gawk
+      Manjaro: gawk
+      # SUSE family
+      openSUSE: gawk
+      SLES: gawk
+      # Alpine
+      Alpine: gawk
+
+  tasks:
+    - name: Display system information
+      debug:
+        msg: 
+          - "OS Distribution: {{ ansible_distribution }}"
+          - "OS Version: {{ ansible_distribution_version }}"
+          - "OS Family: {{ ansible_os_family }}"
+          - "Architecture: {{ ansible_architecture }}"
+          - "Kernel: {{ ansible_kernel }}"
+      
+    - name: Test gawk command availability
+      command: which gawk
+      register: gawk_which
+      failed_when: false
+      changed_when: false
+      
+    - name: Display gawk binary location
+      debug:
+        msg: "Gawk binary found at: {{ gawk_which.stdout }}"
+      when: gawk_which.rc == 0
+      
+    - name: Display gawk not found message
+      debug:
+        msg: "Gawk binary not found in PATH"
+      when: gawk_which.rc != 0
+      
+    - name: Test gawk version command
+      command: gawk --version
+      register: gawk_version
+      failed_when: false
+      changed_when: false
+      
+    - name: Display gawk version
+      debug:
+        msg: "Gawk version: {{ gawk_version.stdout | regex_replace('\\n.*', '') }}"
+      when: gawk_version.rc == 0
+      
+    - name: Display gawk version error
+      debug:
+        msg: "Error getting gawk version: {{ gawk_version.stderr }}"
+      when: gawk_version.rc != 0
+      
+    - name: Test basic gawk functionality
+      shell: echo "Hello World" | gawk '{print "Gawk says: " $0}'
+      register: gawk_test
+      failed_when: false
+      changed_when: false
+      
+    - name: Display gawk functionality test result
+      debug:
+        msg: "Gawk test output: {{ gawk_test.stdout }}"
+      when: gawk_test.rc == 0
+      
+    - name: Display gawk functionality test error
+      debug:
+        msg: "Gawk test failed: {{ gawk_test.stderr }}"
+      when: gawk_test.rc != 0
+      
+    - name: Check package manager for gawk
+      debug:
+        msg: "Expected package name for {{ ansible_distribution }}: {{ gawk_packages[ansible_distribution] | default('gawk') }}"
+      
+    - name: Test package manager detection (Debian/Ubuntu)
+      command: dpkg -l gawk
+      register: dpkg_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "Debian"
+      
+    - name: Display dpkg check result
+      debug:
+        msg: "Package manager shows gawk is installed"
+      when: ansible_os_family == "Debian" and dpkg_check.rc == 0
+      
+    - name: Test package manager detection (RHEL/Fedora)
+      command: rpm -q gawk
+      register: rpm_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "RedHat"
+      
+    - name: Display rpm check result
+      debug:
+        msg: "Package manager shows gawk is installed: {{ rpm_check.stdout }}"
+      when: ansible_os_family == "RedHat" and rpm_check.rc == 0
+      
+    - name: Test package manager detection (Arch)
+      command: pacman -Q gawk
+      register: pacman_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "Archlinux"
+      
+    - name: Display pacman check result
+      debug:
+        msg: "Package manager shows gawk is installed: {{ pacman_check.stdout }}"
+      when: ansible_os_family == "Archlinux" and pacman_check.rc == 0
+      
+    - name: Summary of gawk detection
+      debug:
+        msg:
+          - "=== GAWK DETECTION SUMMARY ==="
+          - "Binary available: {{ 'Yes' if gawk_which.rc == 0 else 'No' }}"
+          - "Version command works: {{ 'Yes' if gawk_version.rc == 0 else 'No' }}"
+          - "Functionality test: {{ 'Passed' if gawk_test.rc == 0 else 'Failed' }}"
+          - "Package installed: {{ 'Yes' if (dpkg_check.rc == 0 and ansible_os_family == 'Debian') or (rpm_check.rc == 0 and ansible_os_family == 'RedHat') or (pacman_check.rc == 0 and ansible_os_family == 'Archlinux') else 'Unknown/No' }}"

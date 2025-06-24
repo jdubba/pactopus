@@ -1,0 +1,247 @@
+---
+# FZF Installation Playbook
+# Cross-distribution fzf installation with package name mapping
+# Supports: Debian/Ubuntu, RHEL/Fedora/CentOS, Arch, SUSE, Alpine
+
+- name: Install FZF across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Package name mappings for different distributions
+    fzf_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.)
+      Debian: fzf
+      Ubuntu: fzf
+      "Pop!_OS": fzf
+      "Linux Mint": fzf
+      elementary: fzf
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: fzf
+      Fedora: fzf
+      CentOS: fzf
+      Rocky: fzf
+      AlmaLinux: fzf
+      # Arch family
+      Archlinux: fzf
+      Manjaro: fzf
+      # SUSE family
+      openSUSE: fzf
+      SLES: fzf
+      # Alpine
+      Alpine: fzf
+    
+    # Rolling release distributions (prefer native packages)
+    rolling_distributions:
+      - Archlinux
+      - Manjaro
+      - Fedora
+      - openSUSE Tumbleweed
+    
+    # Stable distributions (prefer newer sources)
+    stable_distributions:
+      - Debian
+      - Ubuntu
+      - "Pop!_OS"
+      - "Linux Mint"
+      - elementary
+      - RedHat
+      - CentOS
+      - Rocky
+      - AlmaLinux
+      - "Amazon Linux"
+      - Alpine
+      - SLES
+      - "openSUSE Leap"
+    
+    # Ubuntu-based distributions that should use Ubuntu repositories
+    ubuntu_derivatives:
+      - Ubuntu
+      - "Pop!_OS"
+      - "Linux Mint"
+      - elementary
+
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Determine if distribution is rolling or stable
+      set_fact:
+        is_rolling_distribution: "{{ ansible_distribution in rolling_distributions }}"
+        is_stable_distribution: "{{ ansible_distribution in stable_distributions }}"
+
+    - name: Display distribution type
+      debug:
+        msg: "Distribution type: {{ 'Rolling' if is_rolling_distribution else 'Stable' }}"
+
+    # Enable backports repository for Debian stable releases
+    - name: Enable backports repository (Debian)
+      apt_repository:
+        repo: "deb http://deb.debian.org/debian {{ ansible_distribution_release }}-backports main"
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian" and ansible_distribution == "Debian" and is_stable_distribution
+      ignore_errors: yes
+
+    # Enable EPEL for RHEL family stable distributions
+    - name: Enable EPEL repository (RHEL family)
+      dnf:
+        name: epel-release
+        state: present
+      when: ansible_os_family == "RedHat" and is_stable_distribution and ansible_distribution != "Fedora"
+      ignore_errors: yes
+
+    - name: Ensure package cache is updated (Debian/Ubuntu)
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+      
+    - name: Ensure package cache is updated (RHEL/Fedora)
+      dnf:
+        update_cache: yes
+      when: ansible_os_family == "RedHat"
+      ignore_errors: yes
+      
+    - name: Ensure package cache is updated (RHEL/CentOS with yum)
+      yum:
+        update_cache: yes
+      when: ansible_os_family == "RedHat" and ansible_distribution_major_version|int < 8
+      ignore_errors: yes
+      
+    - name: Ensure package cache is updated (Arch)
+      pacman:
+        update_cache: yes
+      when: ansible_os_family == "Archlinux"
+      
+    - name: Ensure package cache is updated (SUSE)
+      zypper:
+        update_cache: yes
+      when: ansible_os_family == "Suse"
+      
+    - name: Ensure package cache is updated (Alpine)
+      apk:
+        update_cache: yes
+      when: ansible_os_family == "Alpine"
+      
+    - name: Check if fzf is already installed
+      command: fzf --version
+      register: fzf_version_check
+      failed_when: false
+      changed_when: false
+      
+    - name: Display current fzf version if installed
+      debug:
+        msg: "FZF is already installed: {{ fzf_version_check.stdout | regex_replace('\\n.*', '') }}"
+      when: fzf_version_check.rc == 0
+      
+    - name: Install/upgrade fzf from backports (Debian stable)
+      apt:
+        name: "{{ fzf_packages[ansible_distribution] | default('fzf') }}"
+        state: latest
+        default_release: "{{ ansible_distribution_release }}-backports"
+      when: ansible_os_family == "Debian" and ansible_distribution == "Debian" and is_stable_distribution
+      ignore_errors: yes
+      
+    - name: Install/upgrade fzf (Ubuntu and derivatives stable) 
+      apt:
+        name: "{{ fzf_packages[ansible_distribution] | default('fzf') }}"
+        state: latest
+      when: ansible_os_family == "Debian" and ansible_distribution in ubuntu_derivatives and is_stable_distribution
+      
+    - name: Install/upgrade fzf (Debian/Ubuntu rolling or fallback)
+      apt:
+        name: "{{ fzf_packages[ansible_distribution] | default('fzf') }}"
+        state: latest
+      when: ansible_os_family == "Debian" and (is_rolling_distribution or ansible_failed_result is defined)
+      
+    - name: Install/upgrade fzf (RHEL/Fedora/CentOS stable with EPEL)
+      dnf:
+        name: "{{ fzf_packages[ansible_distribution] | default('fzf') }}"
+        state: latest
+        enablerepo: epel
+      when: ansible_os_family == "RedHat" and is_stable_distribution and ansible_distribution != "Fedora"
+      ignore_errors: yes
+      
+    - name: Install/upgrade fzf (Fedora rolling)
+      dnf:
+        name: "{{ fzf_packages[ansible_distribution] | default('fzf') }}"
+        state: latest
+      when: ansible_os_family == "RedHat" and ansible_distribution == "Fedora"
+      ignore_errors: yes
+      
+    - name: Install/upgrade fzf (RHEL/CentOS with yum fallback)
+      yum:
+        name: "{{ fzf_packages[ansible_distribution] | default('fzf') }}"
+        state: latest
+        enablerepo: epel
+      when: ansible_os_family == "RedHat" and is_stable_distribution and ansible_distribution_major_version|int < 8
+      ignore_errors: yes
+      
+    - name: Install/upgrade fzf (Arch Linux)
+      pacman:
+        name: "{{ fzf_packages[ansible_distribution] | default('fzf') }}"
+        state: latest
+      when: ansible_os_family == "Archlinux"
+      
+    - name: Install/upgrade fzf (SUSE)
+      zypper:
+        name: "{{ fzf_packages[ansible_distribution] | default('fzf') }}"
+        state: latest
+      when: ansible_os_family == "Suse"
+      
+    - name: Install/upgrade fzf (Alpine)
+      apk:
+        name: "{{ fzf_packages[ansible_distribution] | default('fzf') }}"
+        state: latest
+      when: ansible_os_family == "Alpine"
+      
+    - name: Verify fzf installation
+      command: fzf --version
+      register: fzf_final_version
+      changed_when: false
+      
+    - name: Display final fzf version
+      debug:
+        msg: "FZF installation complete: {{ fzf_final_version.stdout | regex_replace('\\n.*', '') }}"
+        
+    - name: Ensure fzf is in PATH
+      shell: which fzf
+      register: fzf_path
+      changed_when: false
+      
+    - name: Display fzf binary location
+      debug:
+        msg: "FZF binary location: {{ fzf_path.stdout }}"
+
+    - name: Check for fzf shell integration scripts
+      stat:
+        path: "{{ item }}"
+      register: fzf_shell_scripts
+      loop:
+        - /usr/share/fzf/shell/key-bindings.bash
+        - /usr/share/fzf/shell/completion.bash
+        - /usr/local/share/fzf/shell/key-bindings.bash
+        - /usr/local/share/fzf/shell/completion.bash
+      ignore_errors: yes
+
+    - name: Display available fzf shell integration
+      debug:
+        msg: "FZF shell integration available at: {{ item.item }}"
+      loop: "{{ fzf_shell_scripts.results }}"
+      when: item.stat.exists
+      
+    - name: Display fzf usage hint
+      debug:
+        msg: 
+          - "FZF installation complete!"
+          - "Usage: fzf (interactive fuzzy finder)"
+          - "Shell integration: Add 'source /usr/share/fzf/shell/key-bindings.bash' to ~/.bashrc for Ctrl+R history search"
+
+  handlers:
+    - name: refresh package cache
+      package:
+        update_cache: yes

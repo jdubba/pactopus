@@ -1,0 +1,116 @@
+---
+# FZF Removal Playbook
+# Cross-distribution fzf removal with package name mapping
+# Supports: Debian/Ubuntu, RHEL/Fedora/CentOS, Arch, SUSE, Alpine
+
+- name: Remove FZF across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Package name mappings for different distributions
+    fzf_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.)
+      Debian: fzf
+      Ubuntu: fzf
+      "Pop!_OS": fzf
+      "Linux Mint": fzf
+      elementary: fzf
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: fzf
+      Fedora: fzf
+      CentOS: fzf
+      Rocky: fzf
+      AlmaLinux: fzf
+      # Arch family
+      Archlinux: fzf
+      Manjaro: fzf
+      # SUSE family
+      openSUSE: fzf
+      SLES: fzf
+      # Alpine
+      Alpine: fzf
+
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+      
+    - name: Check if fzf is currently installed
+      command: fzf --version
+      register: fzf_version_check
+      failed_when: false
+      changed_when: false
+      
+    - name: Display current fzf version if installed
+      debug:
+        msg: "FZF is currently installed: {{ fzf_version_check.stdout | regex_replace('\\n.*', '') }}"
+      when: fzf_version_check.rc == 0
+      
+    - name: Skip removal if fzf is not installed
+      debug:
+        msg: "FZF is not installed, nothing to remove"
+      when: fzf_version_check.rc != 0
+      
+    - name: Remove fzf (Debian/Ubuntu)
+      apt:
+        name: "{{ fzf_packages[ansible_distribution] | default('fzf') }}"
+        state: absent
+      when: ansible_os_family == "Debian" and fzf_version_check.rc == 0
+      
+    - name: Remove fzf (RHEL/Fedora/CentOS)
+      dnf:
+        name: "{{ fzf_packages[ansible_distribution] | default('fzf') }}"
+        state: absent
+      when: ansible_os_family == "RedHat" and fzf_version_check.rc == 0
+      ignore_errors: yes
+      
+    - name: Remove fzf (RHEL/CentOS with yum fallback)
+      yum:
+        name: "{{ fzf_packages[ansible_distribution] | default('fzf') }}"
+        state: absent
+      when: ansible_os_family == "RedHat" and fzf_version_check.rc == 0 and ansible_distribution_major_version|int < 8
+      ignore_errors: yes
+      
+    - name: Remove fzf (Arch Linux)
+      pacman:
+        name: "{{ fzf_packages[ansible_distribution] | default('fzf') }}"
+        state: absent
+      when: ansible_os_family == "Archlinux" and fzf_version_check.rc == 0
+      
+    - name: Remove fzf (SUSE)
+      zypper:
+        name: "{{ fzf_packages[ansible_distribution] | default('fzf') }}"
+        state: absent
+      when: ansible_os_family == "Suse" and fzf_version_check.rc == 0
+      
+    - name: Remove fzf (Alpine)
+      apk:
+        name: "{{ fzf_packages[ansible_distribution] | default('fzf') }}"
+        state: absent
+      when: ansible_os_family == "Alpine" and fzf_version_check.rc == 0
+      
+    - name: Verify fzf removal
+      command: fzf --version
+      register: fzf_removal_check
+      failed_when: false
+      changed_when: false
+      
+    - name: Display removal success
+      debug:
+        msg: "FZF has been successfully removed"
+      when: fzf_removal_check.rc != 0
+      
+    - name: Display removal warning if still present
+      debug:
+        msg: "Warning: FZF may still be present on the system"
+      when: fzf_removal_check.rc == 0
+      
+    - name: Display shell integration cleanup note
+      debug:
+        msg: 
+          - "Note: You may need to manually remove fzf shell integration from your shell configuration files"
+          - "Check ~/.bashrc, ~/.zshrc for lines like 'source /usr/share/fzf/shell/key-bindings.bash'"
+      when: fzf_removal_check.rc != 0

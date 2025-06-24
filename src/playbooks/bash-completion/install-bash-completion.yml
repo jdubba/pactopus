@@ -1,0 +1,248 @@
+---
+# Bash Completion Installation Playbook
+# Cross-distribution bash-completion installation with package name mapping
+# Supports: Debian/Ubuntu, RHEL/Fedora/CentOS, Arch, SUSE, Alpine
+
+- name: Install Bash Completion across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Package name mappings for different distributions
+    bash_completion_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.)
+      Debian: bash-completion
+      Ubuntu: bash-completion
+      "Pop!_OS": bash-completion
+      "Linux Mint": bash-completion
+      elementary: bash-completion
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: bash-completion
+      Fedora: bash-completion
+      CentOS: bash-completion
+      Rocky: bash-completion
+      AlmaLinux: bash-completion
+      # Arch family
+      Archlinux: bash-completion
+      Manjaro: bash-completion
+      # SUSE family
+      openSUSE: bash-completion
+      SLES: bash-completion
+      # Alpine
+      Alpine: bash-completion
+    
+    # Rolling release distributions (prefer native packages)
+    rolling_distributions:
+      - Archlinux
+      - Manjaro
+      - Fedora
+      - openSUSE Tumbleweed
+    
+    # Stable distributions (prefer newer sources)
+    stable_distributions:
+      - Debian
+      - Ubuntu
+      - "Pop!_OS"
+      - "Linux Mint"
+      - elementary
+      - RedHat
+      - CentOS
+      - Rocky
+      - AlmaLinux
+      - "Amazon Linux"
+      - Alpine
+      - SLES
+      - "openSUSE Leap"
+    
+    # Ubuntu-based distributions that should use Ubuntu repositories
+    ubuntu_derivatives:
+      - Ubuntu
+      - "Pop!_OS"
+      - "Linux Mint"
+      - elementary
+
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Determine if distribution is rolling or stable
+      set_fact:
+        is_rolling_distribution: "{{ ansible_distribution in rolling_distributions }}"
+        is_stable_distribution: "{{ ansible_distribution in stable_distributions }}"
+
+    - name: Display distribution type
+      debug:
+        msg: "Distribution type: {{ 'Rolling' if is_rolling_distribution else 'Stable' }}"
+
+    # Enable backports repository for Debian stable releases
+    - name: Enable backports repository (Debian)
+      apt_repository:
+        repo: "deb http://deb.debian.org/debian {{ ansible_distribution_release }}-backports main"
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian" and ansible_distribution == "Debian" and is_stable_distribution
+      ignore_errors: yes
+
+    # Enable EPEL for RHEL family stable distributions
+    - name: Enable EPEL repository (RHEL family)
+      dnf:
+        name: epel-release
+        state: present
+      when: ansible_os_family == "RedHat" and is_stable_distribution and ansible_distribution != "Fedora"
+      ignore_errors: yes
+
+    - name: Ensure package cache is updated (Debian/Ubuntu)
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+      
+    - name: Ensure package cache is updated (RHEL/Fedora)
+      dnf:
+        update_cache: yes
+      when: ansible_os_family == "RedHat"
+      ignore_errors: yes
+      
+    - name: Ensure package cache is updated (RHEL/CentOS with yum)
+      yum:
+        update_cache: yes
+      when: ansible_os_family == "RedHat" and ansible_distribution_major_version|int < 8
+      ignore_errors: yes
+      
+    - name: Ensure package cache is updated (Arch)
+      pacman:
+        update_cache: yes
+      when: ansible_os_family == "Archlinux"
+      
+    - name: Ensure package cache is updated (SUSE)
+      zypper:
+        update_cache: yes
+      when: ansible_os_family == "Suse"
+      
+    - name: Ensure package cache is updated (Alpine)
+      apk:
+        update_cache: yes
+      when: ansible_os_family == "Alpine"
+      
+    - name: Check if bash-completion is already available
+      stat:
+        path: /usr/share/bash-completion/bash_completion
+      register: bash_completion_check
+      
+    - name: Display current bash-completion status
+      debug:
+        msg: "Bash completion is {{ 'already installed' if bash_completion_check.stat.exists else 'not found' }}"
+      
+    - name: Install/upgrade bash-completion from backports (Debian stable)
+      apt:
+        name: "{{ bash_completion_packages[ansible_distribution] | default('bash-completion') }}"
+        state: latest
+        default_release: "{{ ansible_distribution_release }}-backports"
+      when: ansible_os_family == "Debian" and ansible_distribution == "Debian" and is_stable_distribution
+      ignore_errors: yes
+      
+    - name: Install/upgrade bash-completion (Ubuntu and derivatives stable) 
+      apt:
+        name: "{{ bash_completion_packages[ansible_distribution] | default('bash-completion') }}"
+        state: latest
+      when: ansible_os_family == "Debian" and ansible_distribution in ubuntu_derivatives and is_stable_distribution
+      
+    - name: Install/upgrade bash-completion (Debian/Ubuntu rolling or fallback)
+      apt:
+        name: "{{ bash_completion_packages[ansible_distribution] | default('bash-completion') }}"
+        state: latest
+      when: ansible_os_family == "Debian" and (is_rolling_distribution or ansible_failed_result is defined)
+      
+    - name: Install/upgrade bash-completion (RHEL/Fedora/CentOS stable with EPEL)
+      dnf:
+        name: "{{ bash_completion_packages[ansible_distribution] | default('bash-completion') }}"
+        state: latest
+        enablerepo: epel
+      when: ansible_os_family == "RedHat" and is_stable_distribution and ansible_distribution != "Fedora"
+      ignore_errors: yes
+      
+    - name: Install/upgrade bash-completion (Fedora rolling)
+      dnf:
+        name: "{{ bash_completion_packages[ansible_distribution] | default('bash-completion') }}"
+        state: latest
+      when: ansible_os_family == "RedHat" and ansible_distribution == "Fedora"
+      ignore_errors: yes
+      
+    - name: Install/upgrade bash-completion (RHEL/CentOS with yum fallback)
+      yum:
+        name: "{{ bash_completion_packages[ansible_distribution] | default('bash-completion') }}"
+        state: latest
+        enablerepo: epel
+      when: ansible_os_family == "RedHat" and is_stable_distribution and ansible_distribution_major_version|int < 8
+      ignore_errors: yes
+      
+    - name: Install/upgrade bash-completion (Arch Linux)
+      pacman:
+        name: "{{ bash_completion_packages[ansible_distribution] | default('bash-completion') }}"
+        state: latest
+      when: ansible_os_family == "Archlinux"
+      
+    - name: Install/upgrade bash-completion (SUSE)
+      zypper:
+        name: "{{ bash_completion_packages[ansible_distribution] | default('bash-completion') }}"
+        state: latest
+      when: ansible_os_family == "Suse"
+      
+    - name: Install/upgrade bash-completion (Alpine)
+      apk:
+        name: "{{ bash_completion_packages[ansible_distribution] | default('bash-completion') }}"
+        state: latest
+      when: ansible_os_family == "Alpine"
+      
+    - name: Verify bash-completion installation
+      stat:
+        path: /usr/share/bash-completion/bash_completion
+      register: bash_completion_final_check
+      
+    - name: Display installation result
+      debug:
+        msg: "Bash completion {{ 'installation complete' if bash_completion_final_check.stat.exists else 'installation may have failed - main script not found' }}"
+
+    - name: Check for completion directories
+      stat:
+        path: "{{ item }}"
+      register: completion_dirs
+      loop:
+        - /usr/share/bash-completion/completions
+        - /etc/bash_completion.d
+        - /usr/local/share/bash-completion/completions
+      
+    - name: Display available completion directories
+      debug:
+        msg: "Completion directory found: {{ item.item }}"
+      loop: "{{ completion_dirs.results }}"
+      when: item.stat.exists
+      
+    - name: Check if bash-completion is enabled in bashrc
+      shell: grep -q "bash_completion" ~/.bashrc 2>/dev/null || echo "not_found"
+      register: bashrc_check
+      become: no
+      changed_when: false
+      
+    - name: Display bash-completion activation status
+      debug:
+        msg: "Bash completion in ~/.bashrc: {{ 'Found' if bashrc_check.stdout != 'not_found' else 'Not found' }}"
+      
+    - name: Display bash-completion setup instructions
+      debug:
+        msg: 
+          - "Bash completion installation complete!"
+          - "To enable bash completion, ensure your ~/.bashrc contains:"
+          - "  if [ -f /usr/share/bash-completion/bash_completion ]; then"
+          - "    . /usr/share/bash-completion/bash_completion"
+          - "  fi"
+          - "Then reload your shell: source ~/.bashrc"
+          - "Or start a new terminal session"
+
+  handlers:
+    - name: refresh package cache
+      package:
+        update_cache: yes

@@ -1,0 +1,280 @@
+---
+# Ripgrep Installation Playbook
+# Cross-distribution ripgrep installation with package name mapping
+# Supports: Debian/Ubuntu, RHEL/Fedora/CentOS, Arch, SUSE, Alpine
+
+- name: Install Ripgrep across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Package name mappings for different distributions
+    ripgrep_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.)
+      Debian: ripgrep
+      Ubuntu: ripgrep
+      "Pop!_OS": ripgrep
+      "Linux Mint": ripgrep
+      elementary: ripgrep
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: ripgrep
+      Fedora: ripgrep
+      CentOS: ripgrep
+      Rocky: ripgrep
+      AlmaLinux: ripgrep
+      # Arch family
+      Archlinux: ripgrep
+      Manjaro: ripgrep
+      # SUSE family
+      openSUSE: ripgrep
+      SLES: ripgrep
+      # Alpine
+      Alpine: ripgrep
+    
+    # Rolling release distributions (prefer native packages)
+    rolling_distributions:
+      - Archlinux
+      - Manjaro
+      - Fedora
+      - openSUSE Tumbleweed
+    
+    # Stable distributions (prefer newer sources)
+    stable_distributions:
+      - Debian
+      - Ubuntu
+      - "Pop!_OS"
+      - "Linux Mint"
+      - elementary
+      - RedHat
+      - CentOS
+      - Rocky
+      - AlmaLinux
+      - "Amazon Linux"
+      - Alpine
+      - SLES
+      - "openSUSE Leap"
+    
+    # Ubuntu-based distributions that should use Ubuntu repositories
+    ubuntu_derivatives:
+      - Ubuntu
+      - "Pop!_OS"
+      - "Linux Mint"
+      - elementary
+
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Determine if distribution is rolling or stable
+      set_fact:
+        is_rolling_distribution: "{{ ansible_distribution in rolling_distributions }}"
+        is_stable_distribution: "{{ ansible_distribution in stable_distributions }}"
+
+    - name: Display distribution type
+      debug:
+        msg: "Distribution type: {{ 'Rolling' if is_rolling_distribution else 'Stable' }}"
+
+    # Enable universe repository for Ubuntu derivatives (ripgrep may be in universe)
+    - name: Enable universe repository (Ubuntu derivatives)
+      apt_repository:
+        repo: "{{ item }}"
+        state: present
+      loop:
+        - "deb http://archive.ubuntu.com/ubuntu {{ ansible_distribution_release }} universe"
+        - "deb http://archive.ubuntu.com/ubuntu {{ ansible_distribution_release }}-updates universe"
+      when: ansible_os_family == "Debian" and ansible_distribution in ubuntu_derivatives and is_stable_distribution
+      ignore_errors: yes
+
+    # Enable backports repository for Debian stable releases
+    - name: Enable backports repository (Debian)
+      apt_repository:
+        repo: "deb http://deb.debian.org/debian {{ ansible_distribution_release }}-backports main"
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian" and ansible_distribution == "Debian" and is_stable_distribution
+      ignore_errors: yes
+
+    # Enable EPEL for RHEL family stable distributions
+    - name: Enable EPEL repository (RHEL family)
+      dnf:
+        name: epel-release
+        state: present
+      when: ansible_os_family == "RedHat" and is_stable_distribution and ansible_distribution != "Fedora"
+      ignore_errors: yes
+
+    - name: Ensure package cache is updated (Debian/Ubuntu)
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+      
+    - name: Ensure package cache is updated (RHEL/Fedora)
+      dnf:
+        update_cache: yes
+      when: ansible_os_family == "RedHat"
+      ignore_errors: yes
+      
+    - name: Ensure package cache is updated (RHEL/CentOS with yum)
+      yum:
+        update_cache: yes
+      when: ansible_os_family == "RedHat" and ansible_distribution_major_version|int < 8
+      ignore_errors: yes
+      
+    - name: Ensure package cache is updated (Arch)
+      pacman:
+        update_cache: yes
+      when: ansible_os_family == "Archlinux"
+      
+    - name: Ensure package cache is updated (SUSE)
+      zypper:
+        update_cache: yes
+      when: ansible_os_family == "Suse"
+      
+    - name: Ensure package cache is updated (Alpine)
+      apk:
+        update_cache: yes
+      when: ansible_os_family == "Alpine"
+      
+    - name: Check if ripgrep is already installed
+      command: rg --version
+      register: ripgrep_version_check
+      failed_when: false
+      changed_when: false
+      
+    - name: Display current ripgrep version if installed
+      debug:
+        msg: "Ripgrep is already installed: {{ ripgrep_version_check.stdout | regex_replace('\\n.*', '') }}"
+      when: ripgrep_version_check.rc == 0
+      
+    - name: Install/upgrade ripgrep from backports (Debian stable)
+      apt:
+        name: "{{ ripgrep_packages[ansible_distribution] | default('ripgrep') }}"
+        state: latest
+        default_release: "{{ ansible_distribution_release }}-backports"
+      when: ansible_os_family == "Debian" and ansible_distribution == "Debian" and is_stable_distribution
+      ignore_errors: yes
+      
+    - name: Install/upgrade ripgrep (Ubuntu and derivatives stable) 
+      apt:
+        name: "{{ ripgrep_packages[ansible_distribution] | default('ripgrep') }}"
+        state: latest
+      when: ansible_os_family == "Debian" and ansible_distribution in ubuntu_derivatives and is_stable_distribution
+      ignore_errors: yes
+      
+    - name: Install/upgrade ripgrep (Debian/Ubuntu rolling or fallback)
+      apt:
+        name: "{{ ripgrep_packages[ansible_distribution] | default('ripgrep') }}"
+        state: latest
+      when: ansible_os_family == "Debian" and (is_rolling_distribution or ansible_failed_result is defined)
+      ignore_errors: yes
+      
+    - name: Install/upgrade ripgrep (RHEL/Fedora/CentOS stable with EPEL)
+      dnf:
+        name: "{{ ripgrep_packages[ansible_distribution] | default('ripgrep') }}"
+        state: latest
+        enablerepo: epel
+      when: ansible_os_family == "RedHat" and is_stable_distribution and ansible_distribution != "Fedora"
+      ignore_errors: yes
+      
+    - name: Install/upgrade ripgrep (Fedora rolling)
+      dnf:
+        name: "{{ ripgrep_packages[ansible_distribution] | default('ripgrep') }}"
+        state: latest
+      when: ansible_os_family == "RedHat" and ansible_distribution == "Fedora"
+      ignore_errors: yes
+      
+    - name: Install/upgrade ripgrep (RHEL/CentOS with yum fallback)
+      yum:
+        name: "{{ ripgrep_packages[ansible_distribution] | default('ripgrep') }}"
+        state: latest
+        enablerepo: epel
+      when: ansible_os_family == "RedHat" and is_stable_distribution and ansible_distribution_major_version|int < 8
+      ignore_errors: yes
+      
+    - name: Install/upgrade ripgrep (Arch Linux)
+      pacman:
+        name: "{{ ripgrep_packages[ansible_distribution] | default('ripgrep') }}"
+        state: latest
+      when: ansible_os_family == "Archlinux"
+      
+    - name: Install/upgrade ripgrep (SUSE)
+      zypper:
+        name: "{{ ripgrep_packages[ansible_distribution] | default('ripgrep') }}"
+        state: latest
+      when: ansible_os_family == "Suse"
+      ignore_errors: yes
+      
+    - name: Install/upgrade ripgrep (Alpine)
+      apk:
+        name: "{{ ripgrep_packages[ansible_distribution] | default('ripgrep') }}"
+        state: latest
+      when: ansible_os_family == "Alpine"
+      ignore_errors: yes
+
+    # Fallback: Note about GitHub releases if package not available
+    - name: Check if ripgrep installation succeeded
+      command: rg --version
+      register: ripgrep_verify
+      failed_when: false
+      changed_when: false
+
+    - name: Display package installation note
+      debug:
+        msg: 
+          - "Note: Ripgrep may not be available in all distribution repositories"
+          - "If installation failed, you can install from GitHub releases"
+          - "Visit: https://github.com/BurntSushi/ripgrep/releases"
+      when: ripgrep_verify.rc != 0
+      
+    - name: Verify ripgrep installation
+      command: rg --version
+      register: ripgrep_final_version
+      changed_when: false
+      when: ripgrep_verify.rc == 0
+      
+    - name: Display final ripgrep version
+      debug:
+        msg: "Ripgrep installation complete: {{ ripgrep_final_version.stdout | regex_replace('\\n.*', '') }}"
+      when: ripgrep_verify.rc == 0
+        
+    - name: Ensure ripgrep is in PATH
+      shell: which rg
+      register: ripgrep_path
+      changed_when: false
+      when: ripgrep_verify.rc == 0
+      
+    - name: Display ripgrep binary location
+      debug:
+        msg: "Ripgrep binary location: {{ ripgrep_path.stdout }}"
+      when: ripgrep_verify.rc == 0
+
+    - name: Test ripgrep performance capabilities
+      shell: rg --version | grep -E "(SIMD|AVX)"
+      register: ripgrep_features
+      failed_when: false
+      changed_when: false
+      when: ripgrep_verify.rc == 0
+
+    - name: Display ripgrep performance features
+      debug:
+        msg: "Performance features: {{ ripgrep_features.stdout if ripgrep_features.rc == 0 else 'Standard build' }}"
+      when: ripgrep_verify.rc == 0
+
+    - name: Display ripgrep usage hint
+      debug:
+        msg: 
+          - "Ripgrep installation complete!"
+          - "Usage: rg 'pattern' [path]           # Search for pattern"
+          - "       rg --type py 'pattern'        # Search only Python files"
+          - "       rg --help                     # Show all options"
+          - "       rg --type-list                # List supported file types"
+          - "Note: ripgrep (rg) is much faster than grep for large codebases"
+      when: ripgrep_verify.rc == 0
+
+  handlers:
+    - name: refresh package cache
+      package:
+        update_cache: yes

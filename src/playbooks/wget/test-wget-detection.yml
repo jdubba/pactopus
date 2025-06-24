@@ -1,0 +1,133 @@
+---
+# Wget Detection Test Playbook
+# Tests wget installation detection and functionality
+
+- name: Test Wget Detection and Functionality
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: no
+  
+  tasks:
+    - name: Display system information
+      debug:
+        msg: 
+          - "OS Distribution: {{ ansible_distribution }}"
+          - "OS Version: {{ ansible_distribution_version }}"
+          - "OS Family: {{ ansible_os_family }}"
+          - "Package Manager: {{ ansible_pkg_mgr }}"
+    
+    - name: Check if wget is installed via command
+      command: wget --version
+      register: wget_version_check
+      failed_when: false
+      changed_when: false
+    
+    - name: Display wget version status
+      debug:
+        msg: "Wget command: {{ 'Available' if wget_version_check.rc == 0 else 'Not available' }}"
+    
+    - name: Show wget version details
+      debug:
+        msg: "Wget version: {{ wget_version_check.stdout | regex_replace('\\n.*', '') }}"
+      when: wget_version_check.rc == 0
+    
+    - name: Check wget binary location
+      shell: which wget
+      register: wget_location
+      failed_when: false
+      changed_when: false
+    
+    - name: Display wget binary location
+      debug:
+        msg: "Wget binary location: {{ wget_location.stdout if wget_location.rc == 0 else 'Not found' }}"
+    
+    - name: Test wget basic functionality
+      shell: |
+        timeout 10 wget --spider --quiet https://httpbin.org/get 2>/dev/null && echo "functional" || echo "not_functional"
+      register: wget_function_test
+      failed_when: false
+      changed_when: false
+      when: wget_version_check.rc == 0
+    
+    - name: Display functionality test result
+      debug:
+        msg: "Wget functionality test: {{ wget_function_test.stdout if wget_function_test is defined else 'Skipped (not installed)' }}"
+    
+    - name: Check wget help output
+      shell: |
+        timeout 5 wget --help | head -3 | tail -1 2>/dev/null || echo "help_failed"
+      register: wget_help_test
+      failed_when: false
+      changed_when: false
+      when: wget_version_check.rc == 0
+    
+    - name: Display help test result
+      debug:
+        msg: "Wget help functionality: {{ 'Working' if 'help_failed' not in wget_help_test.stdout else 'Failed' }}"
+      when: wget_version_check.rc == 0 and wget_help_test is defined
+    
+    - name: Check package manager installation status
+      shell: |
+        case "{{ ansible_pkg_mgr }}" in
+          apt)
+            dpkg -l | grep "^ii.*wget " || echo "not_installed"
+            ;;
+          dnf|yum)
+            dnf list installed wget 2>/dev/null || echo "not_installed"
+            ;;
+          pacman)
+            pacman -Qi wget 2>/dev/null || echo "not_installed"
+            ;;
+          zypper)
+            zypper search -i wget 2>/dev/null || echo "not_installed"
+            ;;
+          apk)
+            apk info wget 2>/dev/null || echo "not_installed"
+            ;;
+          *)
+            echo "unsupported_package_manager"
+            ;;
+        esac
+      register: package_check
+      failed_when: false
+      changed_when: false
+    
+    - name: Display package manager installation status
+      debug:
+        msg: "Package manager installation: {{ 'Installed' if package_check.stdout != 'not_installed' and 'not_installed' not in package_check.stdout else 'Not installed' }}"
+      when: package_check is defined
+    
+    - name: Test wget with different protocols
+      shell: |
+        protocols_working=0
+        # Test HTTP
+        if timeout 10 wget --spider --quiet https://httpbin.org/get 2>/dev/null; then
+          protocols_working=$((protocols_working + 1))
+        fi
+        # Test HTTPS
+        if timeout 10 wget --spider --quiet https://httpbin.org/get 2>/dev/null; then
+          protocols_working=$((protocols_working + 1))
+        fi
+        echo "protocols_$protocols_working"
+      register: wget_protocol_test
+      failed_when: false
+      changed_when: false
+      when: wget_version_check.rc == 0
+    
+    - name: Display protocol support test
+      debug:
+        msg: "Protocol support: {{ wget_protocol_test.stdout if wget_protocol_test is defined else 'Skipped' }}"
+      when: wget_version_check.rc == 0
+    
+    - name: Summary of wget detection
+      debug:
+        msg:
+          - "=== WGET DETECTION SUMMARY ==="
+          - "Wget installed: {{ 'Yes' if wget_version_check.rc == 0 else 'No' }}"
+          - "Version: {{ wget_version_check.stdout | regex_replace('\\n.*', '') if wget_version_check.rc == 0 else 'N/A' }}"
+          - "Binary location: {{ wget_location.stdout if wget_location.rc == 0 else 'N/A' }}"
+          - "Package manager: {{ 'Installed' if package_check.stdout != 'not_installed' and 'not_installed' not in package_check.stdout else 'Not installed' if package_check is defined else 'Unknown' }}"
+          - "Functionality: {{ wget_function_test.stdout if wget_function_test is defined else 'N/A' }}"
+          - "Protocol support: {{ wget_protocol_test.stdout if wget_protocol_test is defined else 'N/A' }}"
+          - "Help system: {{ 'Working' if 'help_failed' not in wget_help_test.stdout else 'Failed' if wget_help_test is defined else 'N/A' }}"

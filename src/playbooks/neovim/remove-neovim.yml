@@ -1,0 +1,152 @@
+---
+# Neovim Removal Playbook
+# Removes neovim based on installation method:
+# - Rolling distributions: remove via package manager
+# - Stable distributions: remove binary from /opt and symlink
+
+- name: Remove Neovim across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Rolling release distributions (use native packages)
+    rolling_distributions:
+      - Archlinux
+      - Manjaro
+      - Fedora
+      - openSUSE Tumbleweed
+    
+    # Stable distributions (use binary releases)
+    stable_distributions:
+      - Debian
+      - Ubuntu
+      - "Pop!_OS"
+      - "Linux Mint"
+      - elementary
+      - RedHat
+      - CentOS
+      - Rocky
+      - AlmaLinux
+      - "Amazon Linux"
+      - Alpine
+      - SLES
+      - "openSUSE Leap"
+    
+    # Neovim binary release information
+    neovim_install_dir: "/opt/neovim"
+    neovim_binary_link: "/usr/local/bin/nvim"
+
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Determine if distribution is rolling or stable
+      set_fact:
+        is_rolling_distribution: "{{ ansible_distribution in rolling_distributions }}"
+        is_stable_distribution: "{{ ansible_distribution in stable_distributions }}"
+
+    - name: Display distribution type and removal method
+      debug:
+        msg: 
+          - "Distribution type: {{ 'Rolling' if is_rolling_distribution else 'Stable' }}"
+          - "Removal method: {{ 'Package manager' if is_rolling_distribution else 'Remove binary from /opt' }}"
+
+    - name: Check if neovim is currently installed
+      command: nvim --version
+      register: neovim_version_check
+      failed_when: false
+      changed_when: false
+
+    - name: Display current neovim status
+      debug:
+        msg: "Neovim is {{ 'installed: ' + (neovim_version_check.stdout | regex_replace('\\n.*', '')) if neovim_version_check.rc == 0 else 'not installed' }}"
+
+    - name: Skip removal if neovim is not installed
+      debug:
+        msg: "Neovim is not installed, nothing to remove"
+      when: neovim_version_check.rc != 0
+
+    # Rolling distribution removal (package managers)
+    - name: Remove neovim (Arch Linux)
+      pacman:
+        name: neovim
+        state: absent
+      when: ansible_os_family == "Archlinux" and is_rolling_distribution and neovim_version_check.rc == 0
+
+    - name: Remove neovim (Fedora)
+      dnf:
+        name: neovim
+        state: absent
+      when: ansible_os_family == "RedHat" and ansible_distribution == "Fedora" and is_rolling_distribution and neovim_version_check.rc == 0
+
+    - name: Remove neovim (SUSE rolling)
+      zypper:
+        name: neovim
+        state: absent
+      when: ansible_os_family == "Suse" and is_rolling_distribution and neovim_version_check.rc == 0
+
+    # Stable distribution removal (binary releases from /opt)
+    - name: Check if binary installation exists
+      stat:
+        path: "{{ neovim_install_dir }}"
+      register: neovim_binary_check
+      when: is_stable_distribution
+
+    - name: Remove neovim symbolic link
+      file:
+        path: "{{ neovim_binary_link }}"
+        state: absent
+      when: is_stable_distribution and neovim_binary_check.stat.exists
+
+    - name: Remove neovim installation directory
+      file:
+        path: "{{ neovim_install_dir }}"
+        state: absent
+      when: is_stable_distribution and neovim_binary_check.stat.exists
+
+    - name: Clean up PATH modification in /etc/environment (if present)
+      lineinfile:
+        path: /etc/environment
+        line: 'PATH="/usr/local/bin:$PATH"'
+        state: absent
+        backup: yes
+      when: is_stable_distribution and neovim_binary_check.stat.exists
+      ignore_errors: yes
+
+    # Verification
+    - name: Verify neovim removal
+      command: nvim --version
+      register: neovim_removal_check
+      failed_when: false
+      changed_when: false
+
+    - name: Display removal success
+      debug:
+        msg: "Neovim has been successfully removed from the system"
+      when: neovim_removal_check.rc != 0 and neovim_version_check.rc == 0
+
+    - name: Display removal warning if still present
+      debug:
+        msg: "Warning: Neovim may still be present on the system"
+      when: neovim_removal_check.rc == 0
+
+    - name: Display removal method used
+      debug:
+        msg: "Removal method: {{ 'Package manager (' + ansible_pkg_mgr + ')' if is_rolling_distribution else 'Binary removal from /opt' }}"
+      when: neovim_version_check.rc == 0
+
+    - name: Display post-removal notes
+      debug:
+        msg:
+          - "Neovim removal complete!"
+          - "Method: {{ 'Native package removal' if is_rolling_distribution else 'Binary removal from /opt' }}"
+          - "Previous version: {{ neovim_version_check.stdout | regex_replace('\\n.*', '') if neovim_version_check.rc == 0 else 'Unknown' }}"
+          - ""
+          - "Post-removal notes:"
+          - "1. Your neovim configuration remains at ~/.config/nvim/"
+          - "2. To reinstall: pactopus install neovim"
+          - "3. Alternative editors: vi, vim, nano"
+      when: neovim_version_check.rc == 0

@@ -1,0 +1,256 @@
+---
+# xh Installation Playbook
+# Cross-distribution xh (HTTPie clone in Rust) installation
+# Repository: https://github.com/ducaale/xh
+
+- name: Install xh across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: no
+  
+  vars:
+    # Package name mappings for distributions that have xh packages
+    xh_packages:
+      # Arch family
+      Archlinux: xh
+      Manjaro: xh
+      # Fedora (COPR repository available)
+      Fedora: xh
+    
+    # Rolling release distributions (prefer native packages when available)
+    rolling_distributions:
+      - Archlinux
+      - Manjaro
+      - Fedora
+      - openSUSE Tumbleweed
+    
+    # Stable distributions (use binary releases)
+    stable_distributions:
+      - Debian
+      - Ubuntu
+      - "Pop!_OS"
+      - "Linux Mint"
+      - elementary
+      - RedHat
+      - CentOS
+      - Rocky
+      - AlmaLinux
+      - "Amazon Linux"
+      - Alpine
+      - SLES
+      - "openSUSE Leap"
+    
+    # xh binary release information
+    xh_repo: "ducaale/xh"
+    xh_install_dir: "{{ ansible_env.HOME }}/.local/bin"
+    
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Determine if distribution is rolling or stable
+      set_fact:
+        is_rolling_distribution: "{{ ansible_distribution in rolling_distributions }}"
+        is_stable_distribution: "{{ ansible_distribution in stable_distributions }}"
+
+    - name: Display distribution type and installation method
+      debug:
+        msg: 
+          - "Distribution type: {{ 'Rolling' if is_rolling_distribution else 'Stable' }}"
+          - "Installation method: {{ 'Native package' if is_rolling_distribution and ansible_distribution in xh_packages else 'GitHub binary release' }}"
+
+    - name: Check if xh is already installed
+      command: xh --version
+      register: xh_version_check
+      failed_when: false
+      changed_when: false
+
+    - name: Display current xh version if installed
+      debug:
+        msg: "xh is already installed: {{ xh_version_check.stdout | regex_replace('\\n.*', '') }}"
+      when: xh_version_check.rc == 0
+
+    # Rolling distribution installation (native packages)
+    - name: Install/upgrade xh (Arch Linux)
+      pacman:
+        name: "{{ xh_packages[ansible_distribution] | default('xh') }}"
+        state: latest
+      when: ansible_os_family == "Archlinux" and is_rolling_distribution
+      become: yes
+
+    - name: Install/upgrade xh (Fedora)
+      dnf:
+        name: "{{ xh_packages[ansible_distribution] | default('xh') }}"
+        state: latest
+      when: ansible_os_family == "RedHat" and ansible_distribution == "Fedora" and is_rolling_distribution
+      become: yes
+
+    # Stable distribution installation (GitHub binary releases)
+    - name: Get latest xh release information from GitHub
+      uri:
+        url: "https://api.github.com/repos/{{ xh_repo }}/releases/latest"
+        method: GET
+        return_content: yes
+      register: xh_release_info
+      when: is_stable_distribution or (is_rolling_distribution and ansible_distribution not in xh_packages)
+
+    - name: Set xh version facts
+      set_fact:
+        xh_latest_version: "{{ xh_release_info.json.tag_name }}"
+        xh_download_url: "{{ xh_release_info.json.assets | selectattr('name', 'match', '^xh-.*-x86_64-unknown-linux-musl\\.tar\\.gz$') | map(attribute='browser_download_url') | list | first | default('') }}"
+      when: (is_stable_distribution or (is_rolling_distribution and ansible_distribution not in xh_packages)) and xh_release_info.status == 200
+
+    - name: Display latest xh version information
+      debug:
+        msg:
+          - "Latest xh version: {{ xh_latest_version }}"
+          - "Download URL: {{ xh_download_url }}"
+      when: xh_latest_version is defined and xh_download_url != ""
+
+    - name: Display download URL error
+      debug:
+        msg:
+          - "ERROR: Could not find Linux x86_64 musl binary in xh release assets"
+          - "Available assets: {{ xh_release_info.json.assets | map(attribute='name') | list }}"
+      when: xh_latest_version is defined and xh_download_url == ""
+
+    - name: Create xh installation directory
+      file:
+        path: "{{ xh_install_dir }}"
+        state: directory
+        mode: '0755'
+      when: (is_stable_distribution or (is_rolling_distribution and ansible_distribution not in xh_packages)) and xh_latest_version is defined
+
+    - name: Check if current installation is up to date
+      shell: |
+        if [ -f "{{ xh_install_dir }}/xh" ]; then
+          current_version=$({{ xh_install_dir }}/xh --version | awk '{print $2}')
+          if [ "$current_version" = "{{ xh_latest_version | regex_replace('^v', '') }}" ]; then
+            echo "up_to_date"
+          else
+            echo "outdated"
+          fi
+        else
+          echo "not_installed"
+        fi
+      register: xh_update_check
+      when: (is_stable_distribution or (is_rolling_distribution and ansible_distribution not in xh_packages)) and xh_latest_version is defined
+      changed_when: false
+
+    - name: Display update status
+      debug:
+        msg: "xh status: {{ xh_update_check.stdout }}"
+      when: xh_update_check is defined
+
+    - name: Download xh binary release
+      get_url:
+        url: "{{ xh_download_url }}"
+        dest: "/tmp/xh-{{ xh_latest_version }}.tar.gz"
+        mode: '0644'
+      when: (is_stable_distribution or (is_rolling_distribution and ansible_distribution not in xh_packages)) and xh_update_check.stdout != "up_to_date" and xh_download_url != ""
+      register: xh_download
+
+    - name: Extract xh binary release
+      unarchive:
+        src: "/tmp/xh-{{ xh_latest_version }}.tar.gz"
+        dest: "/tmp"
+        remote_src: yes
+      when: (is_stable_distribution or (is_rolling_distribution and ansible_distribution not in xh_packages)) and xh_download.changed
+      register: xh_extract
+
+    - name: Find extracted xh directory
+      find:
+        paths: "/tmp"
+        patterns: "xh-*"
+        file_type: directory
+      register: xh_extracted_dirs
+      when: (is_stable_distribution or (is_rolling_distribution and ansible_distribution not in xh_packages)) and xh_extract.changed
+
+    - name: Install xh binary to ~/.local/bin
+      copy:
+        src: "{{ xh_extracted_dirs.files[0].path }}/xh"
+        dest: "{{ xh_install_dir }}/xh"
+        mode: '0755'
+        remote_src: yes
+      when: (is_stable_distribution or (is_rolling_distribution and ansible_distribution not in xh_packages)) and xh_extract.changed and xh_extracted_dirs.files | length > 0
+
+    - name: Clean up downloaded files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "/tmp/xh-{{ xh_latest_version }}.tar.gz"
+      when: (is_stable_distribution or (is_rolling_distribution and ansible_distribution not in xh_packages)) and xh_download.changed
+
+    - name: Clean up extracted directories
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ xh_extracted_dirs.files }}"
+      when: (is_stable_distribution or (is_rolling_distribution and ansible_distribution not in xh_packages)) and xh_extract.changed and xh_extracted_dirs.files is defined
+
+    # Verification for both installation methods
+    - name: Verify xh installation
+      command: xh --version
+      register: xh_final_version
+      changed_when: false
+
+    - name: Display final xh version
+      debug:
+        msg: "xh installation complete: {{ xh_final_version.stdout | regex_replace('\\n.*', '') }}"
+
+    - name: Check xh binary location
+      shell: which xh
+      register: xh_path
+      changed_when: false
+
+    - name: Display xh binary location
+      debug:
+        msg: "xh binary location: {{ xh_path.stdout }}"
+
+    - name: Display installation method used
+      debug:
+        msg: "Installation method: {{ 'Package manager (' + ansible_pkg_mgr + ')' if is_rolling_distribution and ansible_distribution in xh_packages else 'GitHub binary release (' + xh_latest_version + ')' }}"
+
+    - name: Test xh functionality
+      command: xh --help
+      register: xh_functionality_test
+      changed_when: false
+      failed_when: false
+
+    - name: Display xh usage and configuration hints
+      debug:
+        msg:
+          - "xh installation complete!"
+          - "Usage: xh [METHOD] URL [ITEM ...]        # Make HTTP requests"
+          - "       xh GET httpbin.org/get            # Simple GET request"
+          - "       xh POST httpbin.org/post key=val  # POST with data"
+          - "       xh --help                         # Show help"
+          - ""
+          - "Examples:"
+          - "  xh GET httpbin.org/get                 # GET request"
+          - "  xh POST httpbin.org/post name=John     # POST with form data"
+          - "  xh PUT httpbin.org/put @data.json      # PUT with JSON file"
+          - "  xh httpbin.org/headers X-API-Key:123   # Custom headers"
+          - "  xh --json POST httpbin.org/post key=val # Force JSON"
+          - ""
+          - "Features:"
+          - "  - HTTPie-compatible syntax and behavior"
+          - "  - Fast Rust implementation"
+          - "  - JSON support, syntax highlighting"
+          - "  - File uploads, authentication"
+          - "  - Session persistence"
+          - ""
+          - "Installation details:"
+          - "  Method: {{ 'Native package' if is_rolling_distribution and ansible_distribution in xh_packages else 'Binary release to ~/.local/bin' }}"
+          - "  Version: {{ xh_final_version.stdout | regex_replace('\\n.*', '') }}"
+          - "  Binary: {{ xh_path.stdout }}"
+          - ""
+          - "Alternative to: curl, wget, HTTPie (httpie)"
+
+  handlers:
+    - name: refresh package cache
+      package:
+        update_cache: yes

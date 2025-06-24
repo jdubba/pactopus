@@ -1,0 +1,99 @@
+---
+# Which Removal Playbook
+# Cross-distribution which package removal
+
+- name: Remove which across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Check if which is currently installed
+      command: which which
+      register: which_location_check
+      failed_when: false
+      changed_when: false
+
+    - name: Display current which status
+      debug:
+        msg: "Which is {{ 'currently available at ' + which_location_check.stdout if which_location_check.rc == 0 else 'not available' }}"
+
+    - name: Skip removal if which is not installed
+      debug:
+        msg: "Which is not available, nothing to remove"
+      when: which_location_check.rc != 0
+
+    - name: Warning about which removal
+      debug:
+        msg: 
+          - "Note: Removing 'which' may affect scripts that depend on it"
+          - "Alternative commands: 'type' (bash built-in), 'command -v'"
+      when: which_location_check.rc == 0
+
+    - name: Remove which (Debian/Ubuntu)
+      apt:
+        name: which
+        state: absent
+        autoremove: yes
+      when: ansible_os_family == "Debian" and which_location_check.rc == 0
+
+    - name: Remove which (RedHat/Fedora)
+      dnf:
+        name: which
+        state: absent
+      when: ansible_os_family == "RedHat" and which_location_check.rc == 0
+
+    - name: Remove which (Arch Linux)
+      pacman:
+        name: which
+        state: absent
+      when: ansible_os_family == "Archlinux" and which_location_check.rc == 0
+
+    - name: Remove which (SUSE)
+      zypper:
+        name: which
+        state: absent
+      when: ansible_os_family == "Suse" and which_location_check.rc == 0
+
+    - name: Remove which (Alpine)
+      apk:
+        name: which
+        state: absent
+      when: ansible_os_family == "Alpine" and which_location_check.rc == 0
+
+    - name: Verify which removal
+      command: which which
+      register: which_removal_check
+      failed_when: false
+      changed_when: false
+
+    - name: Display removal success
+      debug:
+        msg: "Which has been successfully removed from the system"
+      when: which_removal_check.rc != 0 and which_location_check.rc == 0
+
+    - name: Display removal warning if still present
+      debug:
+        msg: "Warning: Which may still be present on the system"
+      when: which_removal_check.rc == 0
+
+    - name: Display post-removal notes
+      debug:
+        msg:
+          - "Which removal complete!"
+          - "Alternative command location tools:"
+          - "  - type [command]        # Bash built-in (always available)"
+          - "  - command -v [command]  # POSIX-compliant alternative"
+          - "  - whereis [command]     # Shows binary, source, manual locations"
+          - "  - locate [command]      # Find files (if mlocate is installed)"
+          - ""
+          - "Examples:"
+          - "  type ls                 # Shows if ls is alias, function, or binary"
+          - "  command -v python       # Shows python location"
+          - "  whereis gcc             # Shows gcc binary and manual locations"
+      when: which_removal_check.rc != 0 and which_location_check.rc == 0

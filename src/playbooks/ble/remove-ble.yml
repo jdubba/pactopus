@@ -1,0 +1,120 @@
+---
+# Ble.sh Removal Playbook
+# Removes ble.sh installation and source repository
+# ble.sh is installed in user space, so no sudo required
+
+- name: Remove ble.sh installation
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: no  # ble.sh is installed in user space
+  
+  vars:
+    # ble.sh repository and installation details
+    ble_repo_name: "ble.sh"
+    
+    # Get SOURCE_INSTALL_LOCATION from pactopus config
+    source_install_location: "{{ ansible_env.HOME }}/source"
+    
+  tasks:
+    - name: Display removal information
+      debug:
+        msg:
+          - "Removing ble.sh (Bash Line Editor)"
+          - "Installation location: {{ ansible_env.HOME }}/.local/share/blesh"
+          - "Source location: {{ source_install_location }}/{{ ble_repo_name }}"
+          - "User: {{ ansible_env.USER }}"
+    
+    - name: Check if ble.sh is currently installed
+      stat:
+        path: "{{ ansible_env.HOME }}/.local/share/blesh/ble.sh"
+      register: ble_install_check
+    
+    - name: Display current installation status
+      debug:
+        msg: "ble.sh is {{ 'currently installed' if ble_install_check.stat.exists else 'not installed' }}"
+    
+    - name: Skip removal if ble.sh is not installed
+      debug:
+        msg: "ble.sh is not installed, nothing to remove"
+      when: not ble_install_check.stat.exists
+    
+    - name: Check if ble.sh source repository exists
+      stat:
+        path: "{{ source_install_location }}/{{ ble_repo_name }}"
+      register: ble_source_check
+    
+    - name: Warning about ble.sh removal
+      debug:
+        msg: 
+          - "WARNING: Removing ble.sh will disable enhanced bash line editing"
+          - "You may need to restart your terminal after removal"
+          - "Your ~/.bashrc will be updated to remove ble.sh configuration"
+      when: ble_install_check.stat.exists
+    
+    - name: Remove ble.sh configuration from .bashrc
+      blockinfile:
+        path: "{{ ansible_env.HOME }}/.bashrc"
+        marker: "# {mark} ble.sh configuration (added by pactopus)"
+        state: absent
+        backup: yes
+      when: ble_install_check.stat.exists
+      register: bashrc_removal
+    
+    - name: Remove ble.sh attach command from .bashrc
+      lineinfile:
+        path: "{{ ansible_env.HOME }}/.bashrc"
+        line: "[[ ${BLE_VERSION-} ]] && ble-attach"
+        state: absent
+        backup: yes
+      when: ble_install_check.stat.exists
+    
+    - name: Remove ble.sh installation directory
+      file:
+        path: "{{ ansible_env.HOME }}/.local/share/blesh"
+        state: absent
+      when: ble_install_check.stat.exists
+      register: install_removal
+    
+    - name: Ask about source repository removal
+      debug:
+        msg: 
+          - "ble.sh source repository found at: {{ source_install_location }}/{{ ble_repo_name }}"
+          - "Keeping source repository for potential future use"
+          - "To manually remove: rm -rf '{{ source_install_location }}/{{ ble_repo_name }}'"
+      when: ble_source_check.stat.exists
+    
+    # Optional: Remove source repository (commented out for safety)
+    # - name: Remove ble.sh source repository
+    #   file:
+    #     path: "{{ source_install_location }}/{{ ble_repo_name }}"
+    #     state: absent
+    #   when: ble_source_check.stat.exists
+    
+    - name: Verify ble.sh removal
+      stat:
+        path: "{{ ansible_env.HOME }}/.local/share/blesh/ble.sh"
+      register: ble_removal_check
+    
+    - name: Display removal success
+      debug:
+        msg: 
+          - "ble.sh has been successfully removed"
+          - "~/.bashrc has been updated to remove ble.sh configuration"
+          - "Please restart your terminal or run: source ~/.bashrc"
+      when: not ble_removal_check.stat.exists and install_removal.changed
+    
+    - name: Display removal warning if still present
+      debug:
+        msg: "Warning: ble.sh may still be present on the system"
+      when: ble_removal_check.stat.exists
+    
+    - name: Display post-removal notes
+      debug:
+        msg: 
+          - "Post-removal notes:"
+          - "1. Your terminal will return to standard bash line editing"
+          - "2. Restart your terminal to complete the removal"
+          - "3. Source repository preserved at: {{ source_install_location }}/{{ ble_repo_name }}"
+          - "4. To reinstall: pactopus install ble"
+      when: not ble_removal_check.stat.exists and install_removal.changed

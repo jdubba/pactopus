@@ -1,0 +1,174 @@
+---
+# Sudo Detection Test Playbook
+# Tests sudo installation detection and functionality
+
+- name: Test Sudo Detection and Functionality
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: no
+  
+  tasks:
+    - name: Display system information
+      debug:
+        msg: 
+          - "OS Distribution: {{ ansible_distribution }}"
+          - "OS Version: {{ ansible_distribution_version }}"
+          - "OS Family: {{ ansible_os_family }}"
+          - "Package Manager: {{ ansible_pkg_mgr }}"
+          - "Current User: {{ ansible_env.USER }}"
+    
+    - name: Check if sudo is installed via command
+      command: sudo --version
+      register: sudo_version_check
+      failed_when: false
+      changed_when: false
+    
+    - name: Display sudo version status
+      debug:
+        msg: "Sudo command: {{ 'Available' if sudo_version_check.rc == 0 else 'Not available' }}"
+    
+    - name: Show sudo version details
+      debug:
+        msg: "Sudo version: {{ sudo_version_check.stdout | regex_replace('\\n.*', '') }}"
+      when: sudo_version_check.rc == 0
+    
+    - name: Check sudo binary location
+      shell: which sudo
+      register: sudo_location
+      failed_when: false
+      changed_when: false
+    
+    - name: Display sudo binary location
+      debug:
+        msg: "Sudo binary location: {{ sudo_location.stdout if sudo_location.rc == 0 else 'Not found' }}"
+    
+    - name: Test sudo basic functionality (non-interactive)
+      shell: |
+        # Test if sudo is working without requiring password
+        if sudo -n true 2>/dev/null; then
+          echo "passwordless_sudo_works"
+        elif sudo -V >/dev/null 2>&1; then
+          echo "sudo_installed_password_required"
+        else
+          echo "sudo_not_functional"
+        fi
+      register: sudo_function_test
+      failed_when: false
+      changed_when: false
+      when: sudo_version_check.rc == 0
+    
+    - name: Display functionality test result
+      debug:
+        msg: "Sudo functionality test: {{ sudo_function_test.stdout if sudo_function_test is defined else 'Skipped (not installed)' }}"
+    
+    - name: Check user sudo privileges
+      shell: |
+        timeout 5 sudo -l 2>/dev/null | head -3 || echo "no_sudo_privileges"
+      register: sudo_privileges_test
+      failed_when: false
+      changed_when: false
+      when: sudo_version_check.rc == 0
+    
+    - name: Display user privileges
+      debug:
+        msg: "User sudo privileges: {{ 'Has privileges' if 'no_sudo_privileges' not in sudo_privileges_test.stdout else 'No privileges' }}"
+      when: sudo_version_check.rc == 0 and sudo_privileges_test is defined
+    
+    - name: Check sudo configuration file
+      stat:
+        path: /etc/sudoers
+      register: sudoers_file_check
+    
+    - name: Display sudoers file status
+      debug:
+        msg: "Sudoers file: {{ 'Exists' if sudoers_file_check.stat.exists else 'Missing' }} at /etc/sudoers"
+    
+    - name: Check package manager installation status
+      shell: |
+        case "{{ ansible_pkg_mgr }}" in
+          apt)
+            dpkg -l | grep "^ii.*sudo " || echo "not_installed"
+            ;;
+          dnf|yum)
+            dnf list installed sudo 2>/dev/null || echo "not_installed"
+            ;;
+          pacman)
+            pacman -Qi sudo 2>/dev/null || echo "not_installed"
+            ;;
+          zypper)
+            zypper search -i sudo 2>/dev/null || echo "not_installed"
+            ;;
+          apk)
+            apk info sudo 2>/dev/null || echo "not_installed"
+            ;;
+          *)
+            echo "unsupported_package_manager"
+            ;;
+        esac
+      register: package_check
+      failed_when: false
+      changed_when: false
+    
+    - name: Display package manager installation status
+      debug:
+        msg: "Package manager installation: {{ 'Installed' if package_check.stdout != 'not_installed' and 'not_installed' not in package_check.stdout else 'Not installed' }}"
+      when: package_check is defined
+    
+    - name: Check common sudo groups
+      shell: |
+        groups_found=""
+        for group in sudo wheel admin; do
+          if getent group "$group" >/dev/null 2>&1; then
+            groups_found="$groups_found $group"
+          fi
+        done
+        if [ -n "$groups_found" ]; then
+          echo "groups:$groups_found"
+        else
+          echo "no_sudo_groups"
+        fi
+      register: sudo_groups_check
+      failed_when: false
+      changed_when: false
+    
+    - name: Display sudo groups availability
+      debug:
+        msg: "Sudo groups available: {{ sudo_groups_check.stdout }}"
+      when: sudo_groups_check is defined
+    
+    - name: Check current user group membership
+      shell: |
+        user_sudo_groups=""
+        for group in sudo wheel admin; do
+          if groups "{{ ansible_env.USER }}" | grep -q "\b$group\b"; then
+            user_sudo_groups="$user_sudo_groups $group"
+          fi
+        done
+        if [ -n "$user_sudo_groups" ]; then
+          echo "member_of:$user_sudo_groups"
+        else
+          echo "not_in_sudo_groups"
+        fi
+      register: user_groups_check
+      failed_when: false
+      changed_when: false
+    
+    - name: Display user group membership
+      debug:
+        msg: "User group membership: {{ user_groups_check.stdout }}"
+      when: user_groups_check is defined
+    
+    - name: Summary of sudo detection
+      debug:
+        msg:
+          - "=== SUDO DETECTION SUMMARY ==="
+          - "Sudo installed: {{ 'Yes' if sudo_version_check.rc == 0 else 'No' }}"
+          - "Version: {{ sudo_version_check.stdout | regex_replace('\\n.*', '') if sudo_version_check.rc == 0 else 'N/A' }}"
+          - "Binary location: {{ sudo_location.stdout if sudo_location.rc == 0 else 'N/A' }}"
+          - "Package manager: {{ 'Installed' if package_check.stdout != 'not_installed' and 'not_installed' not in package_check.stdout else 'Not installed' if package_check is defined else 'Unknown' }}"
+          - "Functionality: {{ sudo_function_test.stdout if sudo_function_test is defined else 'N/A' }}"
+          - "User privileges: {{ 'Has privileges' if 'no_sudo_privileges' not in sudo_privileges_test.stdout else 'No privileges' if sudo_privileges_test is defined else 'N/A' }}"
+          - "Sudoers file: {{ 'Present' if sudoers_file_check.stat.exists else 'Missing' }}"
+          - "Sudo groups: {{ sudo_groups_check.stdout if sudo_groups_check is defined else 'N/A' }}"
+          - "User membership: {{ user_groups_check.stdout if user_groups_check is defined else 'N/A' }}"

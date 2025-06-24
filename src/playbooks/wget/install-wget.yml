@@ -1,0 +1,133 @@
+---
+# Wget Installation Playbook
+# Cross-distribution wget package installation
+# wget is a command-line utility for downloading files from web servers
+
+- name: Install wget across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Package name mappings for different distributions
+    wget_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.)
+      Debian: wget
+      Ubuntu: wget
+      "Pop!_OS": wget
+      "Linux Mint": wget
+      elementary: wget
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: wget
+      Fedora: wget
+      CentOS: wget
+      Rocky: wget
+      AlmaLinux: wget
+      # Arch family
+      Archlinux: wget
+      Manjaro: wget
+      # SUSE family
+      openSUSE: wget
+      SLES: wget
+      # Alpine
+      Alpine: wget
+    
+    # Ubuntu-based distributions
+    ubuntu_derivatives:
+      - Ubuntu
+      - "Pop!_OS"
+      - "Linux Mint"
+      - elementary
+    
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Show package name for this distribution
+      debug:
+        msg: "Wget package name for {{ ansible_distribution }}: {{ wget_packages[ansible_distribution] | default('wget') }}"
+
+    - name: Check if wget is already installed
+      command: wget --version
+      register: wget_version_check
+      failed_when: false
+      changed_when: false
+
+    - name: Display current wget version if installed
+      debug:
+        msg: "Wget is already installed: {{ wget_version_check.stdout | regex_replace('\\n.*', '') }}"
+      when: wget_version_check.rc == 0
+
+    - name: Show what would be installed
+      debug:
+        msg: "{{ 'Wget is already up to date' if wget_version_check.rc == 0 else 'Will install wget package' }}"
+
+    - name: Show installation command that would be used
+      debug:
+        msg: "Installation method: {{ ansible_pkg_mgr }}"
+
+    - name: Ensure package cache is updated
+      package:
+        update_cache: yes
+
+    - name: Install/upgrade wget (Debian/Ubuntu)
+      apt:
+        name: "{{ wget_packages[ansible_distribution] | default('wget') }}"
+        state: latest
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Install/upgrade wget (RedHat/Fedora)
+      dnf:
+        name: "{{ wget_packages[ansible_distribution] | default('wget') }}"
+        state: latest
+      when: ansible_os_family == "RedHat"
+
+    - name: Install/upgrade wget (Arch Linux)
+      pacman:
+        name: "{{ wget_packages[ansible_distribution] | default('wget') }}"
+        state: latest
+      when: ansible_os_family == "Archlinux"
+
+    - name: Install/upgrade wget (SUSE)
+      zypper:
+        name: "{{ wget_packages[ansible_distribution] | default('wget') }}"
+        state: latest
+      when: ansible_os_family == "Suse"
+
+    - name: Install/upgrade wget (Alpine)
+      apk:
+        name: "{{ wget_packages[ansible_distribution] | default('wget') }}"
+        state: latest
+      when: ansible_os_family == "Alpine"
+
+    - name: Verify wget installation
+      command: wget --version
+      register: wget_final_version
+      changed_when: false
+
+    - name: Display final wget version
+      debug:
+        msg: "Wget installation complete: {{ wget_final_version.stdout | regex_replace('\\n.*', '') }}"
+
+    - name: Display wget usage hints
+      debug:
+        msg:
+          - "Wget installation complete!"
+          - "Usage: wget [options] [URL]        # Download files from web servers"
+          - "       wget -O file.txt URL        # Save to specific filename"
+          - "       wget -r URL                 # Recursive download"
+          - "       wget -c URL                 # Continue partial downloads"
+          - "       wget --help                 # Show all options"
+          - ""
+          - "Examples:"
+          - "  wget https://example.com/file.zip"
+          - "  wget -O myfile.txt https://example.com/data.txt"
+          - "  wget -c https://example.com/largefile.iso"
+
+  handlers:
+    - name: refresh package cache
+      package:
+        update_cache: yes

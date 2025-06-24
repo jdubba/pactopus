@@ -1,0 +1,162 @@
+---
+# Which Detection Test Playbook
+# Tests which installation detection and functionality
+
+- name: Test Which Detection and Functionality
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: no
+  
+  tasks:
+    - name: Display system information
+      debug:
+        msg: 
+          - "OS Distribution: {{ ansible_distribution }}"
+          - "OS Version: {{ ansible_distribution_version }}"
+          - "OS Family: {{ ansible_os_family }}"
+          - "Package Manager: {{ ansible_pkg_mgr }}"
+    
+    - name: Check if which is available via command
+      command: which which
+      register: which_location_check
+      failed_when: false
+      changed_when: false
+    
+    - name: Display which availability status
+      debug:
+        msg: "Which command: {{ 'Available at ' + which_location_check.stdout if which_location_check.rc == 0 else 'Not available' }}"
+    
+    - name: Check which version
+      command: which --version
+      register: which_version_check
+      failed_when: false
+      changed_when: false
+      when: which_location_check.rc == 0
+    
+    - name: Show which version details
+      debug:
+        msg: "Which version: {{ which_version_check.stdout | regex_replace('\\n.*', '') }}"
+      when: which_version_check is defined and which_version_check.rc == 0
+    
+    - name: Test which basic functionality
+      shell: |
+        if which ls >/dev/null 2>&1; then
+          echo "functional"
+        else
+          echo "not_functional"
+        fi
+      register: which_function_test
+      failed_when: false
+      changed_when: false
+      when: which_location_check.rc == 0
+    
+    - name: Display functionality test result
+      debug:
+        msg: "Which functionality test: {{ which_function_test.stdout if which_function_test is defined else 'Skipped (not available)' }}"
+    
+    - name: Test which with multiple commands
+      shell: |
+        commands_found=0
+        for cmd in ls bash cat grep; do
+          if which "$cmd" >/dev/null 2>&1; then
+            commands_found=$((commands_found + 1))
+          fi
+        done
+        echo "found_$commands_found"
+      register: which_multi_test
+      failed_when: false
+      changed_when: false
+      when: which_location_check.rc == 0
+    
+    - name: Display multiple command test
+      debug:
+        msg: "Multiple command test: {{ which_multi_test.stdout if which_multi_test is defined else 'Skipped' }}"
+    
+    - name: Check package manager installation status
+      shell: |
+        case "{{ ansible_pkg_mgr }}" in
+          apt)
+            dpkg -l | grep "^ii.*which " || echo "not_installed"
+            ;;
+          dnf|yum)
+            dnf list installed which 2>/dev/null || echo "not_installed"
+            ;;
+          pacman)
+            pacman -Qi which 2>/dev/null || echo "not_installed"
+            ;;
+          zypper)
+            zypper search -i which 2>/dev/null || echo "not_installed"
+            ;;
+          apk)
+            apk info which 2>/dev/null || echo "not_installed"
+            ;;
+          *)
+            echo "unsupported_package_manager"
+            ;;
+        esac
+      register: package_check
+      failed_when: false
+      changed_when: false
+    
+    - name: Display package manager installation status
+      debug:
+        msg: "Package manager installation: {{ 'Installed' if package_check.stdout != 'not_installed' and 'not_installed' not in package_check.stdout else 'Not installed' }}"
+      when: package_check is defined
+    
+    - name: Test alternative command location methods
+      shell: |
+        alternatives_working=0
+        # Test 'type' (bash built-in)
+        if type ls >/dev/null 2>&1; then
+          alternatives_working=$((alternatives_working + 1))
+        fi
+        # Test 'command -v' (POSIX)
+        if command -v ls >/dev/null 2>&1; then
+          alternatives_working=$((alternatives_working + 1))
+        fi
+        # Test 'whereis'
+        if which whereis >/dev/null 2>&1 && whereis ls | grep -q "/"; then
+          alternatives_working=$((alternatives_working + 1))
+        fi
+        echo "alternatives_$alternatives_working"
+      register: alternatives_test
+      failed_when: false
+      changed_when: false
+    
+    - name: Display alternatives test
+      debug:
+        msg: "Alternative command location methods: {{ alternatives_test.stdout if alternatives_test is defined else 'Failed' }}"
+    
+    - name: Compare which vs alternatives for common commands
+      shell: |
+        echo "=== Command Location Comparison ==="
+        for cmd in ls bash cat; do
+          echo "Command: $cmd"
+          if command -v which >/dev/null 2>&1; then
+            echo "  which: $(which $cmd 2>/dev/null || echo 'not found')"
+          fi
+          echo "  type: $(type $cmd 2>/dev/null | head -1 || echo 'not found')"
+          echo "  command -v: $(command -v $cmd 2>/dev/null || echo 'not found')"
+          echo "  ---"
+        done
+      register: comparison_test
+      failed_when: false
+      changed_when: false
+    
+    - name: Display command comparison
+      debug:
+        msg: "{{ comparison_test.stdout_lines }}"
+      when: comparison_test is defined
+    
+    - name: Summary of which detection
+      debug:
+        msg:
+          - "=== WHICH DETECTION SUMMARY ==="
+          - "Which available: {{ 'Yes' if which_location_check.rc == 0 else 'No' }}"
+          - "Location: {{ which_location_check.stdout if which_location_check.rc == 0 else 'N/A' }}"
+          - "Version: {{ which_version_check.stdout | regex_replace('\\n.*', '') if which_version_check is defined and which_version_check.rc == 0 else 'N/A' }}"
+          - "Package manager: {{ 'Installed' if package_check.stdout != 'not_installed' and 'not_installed' not in package_check.stdout else 'Not installed' if package_check is defined else 'Unknown' }}"
+          - "Functionality: {{ which_function_test.stdout if which_function_test is defined else 'N/A' }}"
+          - "Multi-command test: {{ which_multi_test.stdout if which_multi_test is defined else 'N/A' }}"
+          - "Alternatives available: {{ alternatives_test.stdout if alternatives_test is defined else 'N/A' }}"

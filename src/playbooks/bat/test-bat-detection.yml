@@ -1,0 +1,214 @@
+---
+# Bat Detection Test Playbook
+# Tests bat installation detection across distributions
+# Handles bat vs batcat naming differences
+# Useful for debugging package management issues
+
+- name: Test Bat Detection across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: no
+  
+  vars:
+    # Package and binary name mappings
+    bat_packages:
+      Debian: batcat
+      Ubuntu: batcat
+      "Pop!_OS": batcat
+      "Linux Mint": batcat
+      elementary: batcat
+      RedHat: bat
+      Fedora: bat
+      CentOS: bat
+      Rocky: bat
+      AlmaLinux: bat
+      Archlinux: bat
+      Manjaro: bat
+      openSUSE: bat
+      SLES: bat
+      Alpine: bat
+    
+    bat_binaries:
+      Debian: batcat
+      Ubuntu: batcat
+      "Pop!_OS": batcat
+      "Linux Mint": batcat
+      elementary: batcat
+      RedHat: bat
+      Fedora: bat
+      CentOS: bat
+      Rocky: bat
+      AlmaLinux: bat
+      Archlinux: bat
+      Manjaro: bat
+      openSUSE: bat
+      SLES: bat
+      Alpine: bat
+
+  tasks:
+    - name: Display system information
+      debug:
+        msg: 
+          - "OS Distribution: {{ ansible_distribution }}"
+          - "OS Version: {{ ansible_distribution_version }}"
+          - "OS Family: {{ ansible_os_family }}"
+          - "Architecture: {{ ansible_architecture }}"
+          - "Expected package: {{ bat_packages[ansible_distribution] | default('bat') }}"
+          - "Expected binary: {{ bat_binaries[ansible_distribution] | default('bat') }}"
+      
+    - name: Test bat command availability
+      command: "which {{ bat_binaries[ansible_distribution] | default('bat') }}"
+      register: bat_which
+      failed_when: false
+      changed_when: false
+      
+    - name: Display bat binary location
+      debug:
+        msg: "Bat binary found at: {{ bat_which.stdout }}"
+      when: bat_which.rc == 0
+      
+    - name: Display bat not found message
+      debug:
+        msg: "Bat binary not found in PATH"
+      when: bat_which.rc != 0
+      
+    - name: Test bat version command
+      command: "{{ bat_binaries[ansible_distribution] | default('bat') }} --version"
+      register: bat_version
+      failed_when: false
+      changed_when: false
+      
+    - name: Display bat version
+      debug:
+        msg: "Bat version: {{ bat_version.stdout | regex_replace('\\n.*', '') }}"
+      when: bat_version.rc == 0
+      
+    - name: Display bat version error
+      debug:
+        msg: "Error getting bat version: {{ bat_version.stderr }}"
+      when: bat_version.rc != 0
+      
+    - name: Create test file for bat functionality test
+      copy:
+        content: |
+          #!/bin/bash
+          # Test file for bat syntax highlighting
+          echo "Hello World"
+          for i in {1..5}; do
+              echo "Line $i"
+          done
+        dest: /tmp/pactopus_bat_test.sh
+        mode: '0644'
+      when: bat_version.rc == 0
+      
+    - name: Test basic bat functionality
+      shell: "{{ bat_binaries[ansible_distribution] | default('bat') }} --color=never --plain /tmp/pactopus_bat_test.sh"
+      register: bat_test
+      failed_when: false
+      changed_when: false
+      when: bat_version.rc == 0
+      
+    - name: Display bat functionality test result
+      debug:
+        msg: "Bat test: {{ 'PASSED' if 'Hello World' in bat_test.stdout else 'FAILED' }}"
+      when: bat_version.rc == 0 and bat_test.rc == 0
+      
+    - name: Display bat functionality test error
+      debug:
+        msg: "Bat test failed: {{ bat_test.stderr }}"
+      when: bat_version.rc == 0 and bat_test.rc != 0
+      
+    - name: Test bat themes list
+      command: "{{ bat_binaries[ansible_distribution] | default('bat') }} --list-themes"
+      register: bat_themes
+      failed_when: false
+      changed_when: false
+      when: bat_version.rc == 0
+      
+    - name: Count available themes
+      set_fact:
+        theme_count: "{{ bat_themes.stdout_lines | length }}"
+      when: bat_version.rc == 0 and bat_themes.rc == 0
+      
+    - name: Display themes information
+      debug:
+        msg: "Available themes: {{ theme_count | default('0') }}"
+      when: bat_version.rc == 0
+      
+    - name: Test bat language detection
+      command: "{{ bat_binaries[ansible_distribution] | default('bat') }} --list-languages"
+      register: bat_languages
+      failed_when: false
+      changed_when: false
+      when: bat_version.rc == 0
+      
+    - name: Count supported languages
+      set_fact:
+        language_count: "{{ bat_languages.stdout_lines | length }}"
+      when: bat_version.rc == 0 and bat_languages.rc == 0
+      
+    - name: Clean up test file
+      file:
+        path: /tmp/pactopus_bat_test.sh
+        state: absent
+      when: bat_version.rc == 0
+      
+    - name: Check for bat alias (Debian/Ubuntu)
+      stat:
+        path: /usr/bin/bat
+      register: bat_alias_check
+      when: ansible_os_family == "Debian"
+      
+    - name: Check package manager for bat
+      debug:
+        msg: "Expected package name for {{ ansible_distribution }}: {{ bat_packages[ansible_distribution] | default('bat') }}"
+      
+    - name: Test package manager detection (Debian/Ubuntu)
+      command: "dpkg -l {{ bat_packages[ansible_distribution] | default('bat') }}"
+      register: dpkg_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "Debian"
+      
+    - name: Display dpkg check result
+      debug:
+        msg: "Package manager shows {{ bat_packages[ansible_distribution] | default('bat') }} is installed"
+      when: ansible_os_family == "Debian" and dpkg_check.rc == 0
+      
+    - name: Test package manager detection (RHEL/Fedora)
+      command: "rpm -q {{ bat_packages[ansible_distribution] | default('bat') }}"
+      register: rpm_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "RedHat"
+      
+    - name: Display rpm check result
+      debug:
+        msg: "Package manager shows {{ bat_packages[ansible_distribution] | default('bat') }} is installed: {{ rpm_check.stdout }}"
+      when: ansible_os_family == "RedHat" and rpm_check.rc == 0
+      
+    - name: Test package manager detection (Arch)
+      command: "pacman -Q {{ bat_packages[ansible_distribution] | default('bat') }}"
+      register: pacman_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "Archlinux"
+      
+    - name: Display pacman check result
+      debug:
+        msg: "Package manager shows {{ bat_packages[ansible_distribution] | default('bat') }} is installed: {{ pacman_check.stdout }}"
+      when: ansible_os_family == "Archlinux" and pacman_check.rc == 0
+      
+    - name: Summary of bat detection
+      debug:
+        msg:
+          - "=== BAT DETECTION SUMMARY ==="
+          - "Expected binary: {{ bat_binaries[ansible_distribution] | default('bat') }}"
+          - "Binary available: {{ 'Yes' if bat_which.rc == 0 else 'No' }}"
+          - "Version command works: {{ 'Yes' if bat_version.rc == 0 else 'No' }}"
+          - "Functionality test: {{ 'Passed' if bat_test.rc == 0 and 'Hello World' in bat_test.stdout else 'Failed' if bat_version.rc == 0 else 'Skipped' }}"
+          - "Available themes: {{ theme_count | default('Unknown') }}"
+          - "Supported languages: {{ language_count | default('Unknown') }}"
+          - "Package installed: {{ 'Yes' if (dpkg_check.rc == 0 and ansible_os_family == 'Debian') or (rpm_check.rc == 0 and ansible_os_family == 'RedHat') or (pacman_check.rc == 0 and ansible_os_family == 'Archlinux') else 'Unknown/No' }}"
+          - "Debian/Ubuntu note: {{ 'Uses batcat package/binary' if ansible_os_family == 'Debian' else 'N/A' }}"

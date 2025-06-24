@@ -1,0 +1,109 @@
+---
+# Make Removal Playbook
+# Cross-distribution make removal with package name mapping
+# Supports: Debian/Ubuntu, RHEL/Fedora/CentOS, Arch, SUSE, Alpine
+
+- name: Remove Make across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Package name mappings for different distributions
+    make_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.)
+      Debian: make
+      Ubuntu: make
+      "Pop!_OS": make
+      "Linux Mint": make
+      elementary: make
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: make
+      Fedora: make
+      CentOS: make
+      Rocky: make
+      AlmaLinux: make
+      # Arch family
+      Archlinux: make
+      Manjaro: make
+      # SUSE family
+      openSUSE: make
+      SLES: make
+      # Alpine
+      Alpine: make
+
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+      
+    - name: Check if make is currently installed
+      command: make --version
+      register: make_version_check
+      failed_when: false
+      changed_when: false
+      
+    - name: Display current make version if installed
+      debug:
+        msg: "Make is currently installed: {{ make_version_check.stdout | regex_replace('\\n.*', '') }}"
+      when: make_version_check.rc == 0
+      
+    - name: Skip removal if make is not installed
+      debug:
+        msg: "Make is not installed, nothing to remove"
+      when: make_version_check.rc != 0
+      
+    - name: Remove make (Debian/Ubuntu)
+      apt:
+        name: "{{ make_packages[ansible_distribution] | default('make') }}"
+        state: absent
+      when: ansible_os_family == "Debian" and make_version_check.rc == 0
+      
+    - name: Remove make (RHEL/Fedora/CentOS)
+      dnf:
+        name: "{{ make_packages[ansible_distribution] | default('make') }}"
+        state: absent
+      when: ansible_os_family == "RedHat" and make_version_check.rc == 0
+      ignore_errors: yes
+      
+    - name: Remove make (RHEL/CentOS with yum fallback)
+      yum:
+        name: "{{ make_packages[ansible_distribution] | default('make') }}"
+        state: absent
+      when: ansible_os_family == "RedHat" and make_version_check.rc == 0 and ansible_distribution_major_version|int < 8
+      ignore_errors: yes
+      
+    - name: Remove make (Arch Linux)
+      pacman:
+        name: "{{ make_packages[ansible_distribution] | default('make') }}"
+        state: absent
+      when: ansible_os_family == "Archlinux" and make_version_check.rc == 0
+      
+    - name: Remove make (SUSE)
+      zypper:
+        name: "{{ make_packages[ansible_distribution] | default('make') }}"
+        state: absent
+      when: ansible_os_family == "Suse" and make_version_check.rc == 0
+      
+    - name: Remove make (Alpine)
+      apk:
+        name: "{{ make_packages[ansible_distribution] | default('make') }}"
+        state: absent
+      when: ansible_os_family == "Alpine" and make_version_check.rc == 0
+      
+    - name: Verify make removal
+      command: make --version
+      register: make_removal_check
+      failed_when: false
+      changed_when: false
+      
+    - name: Display removal success
+      debug:
+        msg: "Make has been successfully removed"
+      when: make_removal_check.rc != 0
+      
+    - name: Display removal warning if still present
+      debug:
+        msg: "Warning: Make may still be present on the system"
+      when: make_removal_check.rc == 0

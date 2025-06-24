@@ -1,0 +1,132 @@
+---
+# Fastfetch Removal Playbook
+# Cross-distribution fastfetch removal with package name mapping
+# Supports: Debian/Ubuntu, RHEL/Fedora/CentOS, Arch, SUSE, Alpine
+
+- name: Remove Fastfetch across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Package name mappings for different distributions
+    fastfetch_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.)
+      Debian: fastfetch
+      Ubuntu: fastfetch
+      "Pop!_OS": fastfetch
+      "Linux Mint": fastfetch
+      elementary: fastfetch
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: fastfetch
+      Fedora: fastfetch
+      CentOS: fastfetch
+      Rocky: fastfetch
+      AlmaLinux: fastfetch
+      # Arch family
+      Archlinux: fastfetch
+      Manjaro: fastfetch
+      # SUSE family
+      openSUSE: fastfetch
+      SLES: fastfetch
+      # Alpine
+      Alpine: fastfetch
+
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+      
+    - name: Check if fastfetch is currently installed
+      command: fastfetch --version
+      register: fastfetch_version_check
+      failed_when: false
+      changed_when: false
+      
+    - name: Display current fastfetch version if installed
+      debug:
+        msg: "Fastfetch is currently installed: {{ fastfetch_version_check.stdout | regex_replace('\\n.*', '') }}"
+      when: fastfetch_version_check.rc == 0
+      
+    - name: Skip removal if fastfetch is not installed
+      debug:
+        msg: "Fastfetch is not installed, nothing to remove"
+      when: fastfetch_version_check.rc != 0
+      
+    - name: Remove fastfetch (Debian/Ubuntu)
+      apt:
+        name: "{{ fastfetch_packages[ansible_distribution] | default('fastfetch') }}"
+        state: absent
+      when: ansible_os_family == "Debian" and fastfetch_version_check.rc == 0
+      
+    - name: Remove fastfetch (RHEL/Fedora/CentOS)
+      dnf:
+        name: "{{ fastfetch_packages[ansible_distribution] | default('fastfetch') }}"
+        state: absent
+      when: ansible_os_family == "RedHat" and fastfetch_version_check.rc == 0
+      ignore_errors: yes
+      
+    - name: Remove fastfetch (RHEL/CentOS with yum fallback)
+      yum:
+        name: "{{ fastfetch_packages[ansible_distribution] | default('fastfetch') }}"
+        state: absent
+      when: ansible_os_family == "RedHat" and fastfetch_version_check.rc == 0 and ansible_distribution_major_version|int < 8
+      ignore_errors: yes
+      
+    - name: Remove fastfetch (Arch Linux)
+      pacman:
+        name: "{{ fastfetch_packages[ansible_distribution] | default('fastfetch') }}"
+        state: absent
+      when: ansible_os_family == "Archlinux" and fastfetch_version_check.rc == 0
+      
+    - name: Remove fastfetch (SUSE)
+      zypper:
+        name: "{{ fastfetch_packages[ansible_distribution] | default('fastfetch') }}"
+        state: absent
+      when: ansible_os_family == "Suse" and fastfetch_version_check.rc == 0
+      
+    - name: Remove fastfetch (Alpine)
+      apk:
+        name: "{{ fastfetch_packages[ansible_distribution] | default('fastfetch') }}"
+        state: absent
+      when: ansible_os_family == "Alpine" and fastfetch_version_check.rc == 0
+      
+    - name: Verify fastfetch removal
+      command: fastfetch --version
+      register: fastfetch_removal_check
+      failed_when: false
+      changed_when: false
+      
+    - name: Display removal success
+      debug:
+        msg: "Fastfetch has been successfully removed"
+      when: fastfetch_removal_check.rc != 0
+      
+    - name: Display removal warning if still present
+      debug:
+        msg: "Warning: Fastfetch may still be present on the system"
+      when: fastfetch_removal_check.rc == 0
+      
+    - name: Check for fastfetch configuration directory
+      stat:
+        path: "{{ ansible_env.HOME }}/.config/fastfetch"
+      register: fastfetch_config_dir
+      become: no
+      when: fastfetch_removal_check.rc != 0
+      
+    - name: Display configuration cleanup note
+      debug:
+        msg: 
+          - "Note: Fastfetch configuration directory still exists at ~/.config/fastfetch"
+          - "You may want to remove it manually if you don't plan to reinstall fastfetch"
+          - "Command: rm -rf ~/.config/fastfetch"
+      when: fastfetch_removal_check.rc != 0 and fastfetch_config_dir.stat.exists
+      
+    - name: Display manual removal note
+      debug:
+        msg: 
+          - "Note: If fastfetch was installed manually from GitHub releases,"
+          - "you may need to remove it manually from /usr/local/bin/fastfetch"
+          - "or wherever it was installed"
+      when: fastfetch_removal_check.rc == 0

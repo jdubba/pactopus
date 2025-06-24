@@ -1,0 +1,137 @@
+---
+# Bat Removal Playbook
+# Cross-distribution bat removal with package name mapping
+# Handles bat vs batcat naming differences across distributions
+# Supports: Debian/Ubuntu, RHEL/Fedora/CentOS, Arch, SUSE, Alpine
+
+- name: Remove Bat across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Package name mappings for different distributions
+    bat_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.) - uses batcat
+      Debian: batcat
+      Ubuntu: batcat
+      "Pop!_OS": batcat
+      "Linux Mint": batcat
+      elementary: batcat
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma) - uses bat
+      RedHat: bat
+      Fedora: bat
+      CentOS: bat
+      Rocky: bat
+      AlmaLinux: bat
+      # Arch family - uses bat
+      Archlinux: bat
+      Manjaro: bat
+      # SUSE family - uses bat
+      openSUSE: bat
+      SLES: bat
+      # Alpine - uses bat
+      Alpine: bat
+    
+    # Binary name mappings
+    bat_binaries:
+      # Debian family uses batcat binary
+      Debian: batcat
+      Ubuntu: batcat
+      "Pop!_OS": batcat
+      "Linux Mint": batcat
+      elementary: batcat
+      # All others use bat binary
+      RedHat: bat
+      Fedora: bat
+      CentOS: bat
+      Rocky: bat
+      AlmaLinux: bat
+      Archlinux: bat
+      Manjaro: bat
+      openSUSE: bat
+      SLES: bat
+      Alpine: bat
+
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+      
+    - name: Check if bat is currently installed
+      command: "{{ bat_binaries[ansible_distribution] | default('bat') }} --version"
+      register: bat_version_check
+      failed_when: false
+      changed_when: false
+      
+    - name: Display current bat version if installed
+      debug:
+        msg: "Bat is currently installed: {{ bat_version_check.stdout | regex_replace('\\n.*', '') }}"
+      when: bat_version_check.rc == 0
+      
+    - name: Skip removal if bat is not installed
+      debug:
+        msg: "Bat is not installed, nothing to remove"
+      when: bat_version_check.rc != 0
+      
+    - name: Remove bat (Debian/Ubuntu) - removes batcat package
+      apt:
+        name: "{{ bat_packages[ansible_distribution] | default('bat') }}"
+        state: absent
+      when: ansible_os_family == "Debian" and bat_version_check.rc == 0
+      
+    - name: Remove bat (RHEL/Fedora/CentOS)
+      dnf:
+        name: "{{ bat_packages[ansible_distribution] | default('bat') }}"
+        state: absent
+      when: ansible_os_family == "RedHat" and bat_version_check.rc == 0
+      ignore_errors: yes
+      
+    - name: Remove bat (RHEL/CentOS with yum fallback)
+      yum:
+        name: "{{ bat_packages[ansible_distribution] | default('bat') }}"
+        state: absent
+      when: ansible_os_family == "RedHat" and bat_version_check.rc == 0 and ansible_distribution_major_version|int < 8
+      ignore_errors: yes
+      
+    - name: Remove bat (Arch Linux)
+      pacman:
+        name: "{{ bat_packages[ansible_distribution] | default('bat') }}"
+        state: absent
+      when: ansible_os_family == "Archlinux" and bat_version_check.rc == 0
+      
+    - name: Remove bat (SUSE)
+      zypper:
+        name: "{{ bat_packages[ansible_distribution] | default('bat') }}"
+        state: absent
+      when: ansible_os_family == "Suse" and bat_version_check.rc == 0
+      
+    - name: Remove bat (Alpine)
+      apk:
+        name: "{{ bat_packages[ansible_distribution] | default('bat') }}"
+        state: absent
+      when: ansible_os_family == "Alpine" and bat_version_check.rc == 0
+      
+    - name: Verify bat removal
+      command: "{{ bat_binaries[ansible_distribution] | default('bat') }} --version"
+      register: bat_removal_check
+      failed_when: false
+      changed_when: false
+      
+    - name: Display removal success
+      debug:
+        msg: "Bat has been successfully removed"
+      when: bat_removal_check.rc != 0
+      
+    - name: Display removal warning if still present
+      debug:
+        msg: "Warning: Bat may still be present on the system"
+      when: bat_removal_check.rc == 0
+      
+    - name: Display package naming note (Debian/Ubuntu)
+      debug:
+        msg: 
+          - "Note: On Debian/Ubuntu systems, bat was installed as 'batcat' package"
+          - "The batcat package has been removed"
+      when: ansible_os_family == "Debian" and bat_removal_check.rc != 0

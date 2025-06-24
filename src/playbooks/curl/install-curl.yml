@@ -1,0 +1,244 @@
+---
+# Curl Installation Playbook
+# Cross-distribution curl installation with package name mapping
+# Supports: Debian/Ubuntu, RHEL/Fedora/CentOS, Arch, SUSE, Alpine
+
+- name: Install Curl across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Package name mappings for different distributions
+    curl_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.)
+      Debian: curl
+      Ubuntu: curl
+      "Pop!_OS": curl
+      "Linux Mint": curl
+      elementary: curl
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: curl
+      Fedora: curl
+      CentOS: curl
+      Rocky: curl
+      AlmaLinux: curl
+      # Arch family
+      Archlinux: curl
+      Manjaro: curl
+      # SUSE family
+      openSUSE: curl
+      SLES: curl
+      # Alpine
+      Alpine: curl
+    
+    # Rolling release distributions (prefer native packages)
+    rolling_distributions:
+      - Archlinux
+      - Manjaro
+      - Fedora
+      - openSUSE Tumbleweed
+    
+    # Stable distributions (prefer newer sources)
+    stable_distributions:
+      - Debian
+      - Ubuntu
+      - "Pop!_OS"
+      - "Linux Mint"
+      - elementary
+      - RedHat
+      - CentOS
+      - Rocky
+      - AlmaLinux
+      - "Amazon Linux"
+      - Alpine
+      - SLES
+      - "openSUSE Leap"
+    
+    # Ubuntu-based distributions that should use Ubuntu repositories
+    ubuntu_derivatives:
+      - Ubuntu
+      - "Pop!_OS"
+      - "Linux Mint"
+      - elementary
+
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Determine if distribution is rolling or stable
+      set_fact:
+        is_rolling_distribution: "{{ ansible_distribution in rolling_distributions }}"
+        is_stable_distribution: "{{ ansible_distribution in stable_distributions }}"
+
+    - name: Display distribution type
+      debug:
+        msg: "Distribution type: {{ 'Rolling' if is_rolling_distribution else 'Stable' }}"
+
+    # Enable backports repository for Debian stable releases
+    - name: Enable backports repository (Debian)
+      apt_repository:
+        repo: "deb http://deb.debian.org/debian {{ ansible_distribution_release }}-backports main"
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian" and ansible_distribution == "Debian" and is_stable_distribution
+      ignore_errors: yes
+
+    # Enable EPEL for RHEL family stable distributions
+    - name: Enable EPEL repository (RHEL family)
+      dnf:
+        name: epel-release
+        state: present
+      when: ansible_os_family == "RedHat" and is_stable_distribution and ansible_distribution != "Fedora"
+      ignore_errors: yes
+
+    - name: Ensure package cache is updated (Debian/Ubuntu)
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+      
+    - name: Ensure package cache is updated (RHEL/Fedora)
+      dnf:
+        update_cache: yes
+      when: ansible_os_family == "RedHat"
+      ignore_errors: yes
+      
+    - name: Ensure package cache is updated (RHEL/CentOS with yum)
+      yum:
+        update_cache: yes
+      when: ansible_os_family == "RedHat" and ansible_distribution_major_version|int < 8
+      ignore_errors: yes
+      
+    - name: Ensure package cache is updated (Arch)
+      pacman:
+        update_cache: yes
+      when: ansible_os_family == "Archlinux"
+      
+    - name: Ensure package cache is updated (SUSE)
+      zypper:
+        update_cache: yes
+      when: ansible_os_family == "Suse"
+      
+    - name: Ensure package cache is updated (Alpine)
+      apk:
+        update_cache: yes
+      when: ansible_os_family == "Alpine"
+      
+    - name: Check if curl is already installed
+      command: curl --version
+      register: curl_version_check
+      failed_when: false
+      changed_when: false
+      
+    - name: Display current curl version if installed
+      debug:
+        msg: "Curl is already installed: {{ curl_version_check.stdout | regex_replace('\\n.*', '') }}"
+      when: curl_version_check.rc == 0
+      
+    - name: Install/upgrade curl from backports (Debian stable)
+      apt:
+        name: "{{ curl_packages[ansible_distribution] | default('curl') }}"
+        state: latest
+        default_release: "{{ ansible_distribution_release }}-backports"
+      when: ansible_os_family == "Debian" and ansible_distribution == "Debian" and is_stable_distribution
+      ignore_errors: yes
+      
+    - name: Install/upgrade curl (Ubuntu and derivatives stable) 
+      apt:
+        name: "{{ curl_packages[ansible_distribution] | default('curl') }}"
+        state: latest
+      when: ansible_os_family == "Debian" and ansible_distribution in ubuntu_derivatives and is_stable_distribution
+      
+    - name: Install/upgrade curl (Debian/Ubuntu rolling or fallback)
+      apt:
+        name: "{{ curl_packages[ansible_distribution] | default('curl') }}"
+        state: latest
+      when: ansible_os_family == "Debian" and (is_rolling_distribution or ansible_failed_result is defined)
+      
+    - name: Install/upgrade curl (RHEL/Fedora/CentOS stable with EPEL)
+      dnf:
+        name: "{{ curl_packages[ansible_distribution] | default('curl') }}"
+        state: latest
+        enablerepo: epel
+      when: ansible_os_family == "RedHat" and is_stable_distribution and ansible_distribution != "Fedora"
+      ignore_errors: yes
+      
+    - name: Install/upgrade curl (Fedora rolling)
+      dnf:
+        name: "{{ curl_packages[ansible_distribution] | default('curl') }}"
+        state: latest
+      when: ansible_os_family == "RedHat" and ansible_distribution == "Fedora"
+      ignore_errors: yes
+      
+    - name: Install/upgrade curl (RHEL/CentOS with yum fallback)
+      yum:
+        name: "{{ curl_packages[ansible_distribution] | default('curl') }}"
+        state: latest
+        enablerepo: epel
+      when: ansible_os_family == "RedHat" and is_stable_distribution and ansible_distribution_major_version|int < 8
+      ignore_errors: yes
+      
+    - name: Install/upgrade curl (Arch Linux)
+      pacman:
+        name: "{{ curl_packages[ansible_distribution] | default('curl') }}"
+        state: latest
+      when: ansible_os_family == "Archlinux"
+      
+    - name: Install/upgrade curl (SUSE)
+      zypper:
+        name: "{{ curl_packages[ansible_distribution] | default('curl') }}"
+        state: latest
+      when: ansible_os_family == "Suse"
+      
+    - name: Install/upgrade curl (Alpine)
+      apk:
+        name: "{{ curl_packages[ansible_distribution] | default('curl') }}"
+        state: latest
+      when: ansible_os_family == "Alpine"
+      
+    - name: Verify curl installation
+      command: curl --version
+      register: curl_final_version
+      changed_when: false
+      
+    - name: Display final curl version
+      debug:
+        msg: "Curl installation complete: {{ curl_final_version.stdout | regex_replace('\\n.*', '') }}"
+        
+    - name: Ensure curl is in PATH
+      shell: which curl
+      register: curl_path
+      changed_when: false
+      
+    - name: Display curl binary location
+      debug:
+        msg: "Curl binary location: {{ curl_path.stdout }}"
+
+    - name: Display curl features and protocols
+      shell: curl --version | grep -E "(Protocols|Features):"
+      register: curl_features
+      changed_when: false
+      ignore_errors: yes
+      
+    - name: Show curl capabilities
+      debug:
+        msg: "{{ curl_features.stdout }}"
+      when: curl_features.rc == 0
+      
+    - name: Display curl usage hint
+      debug:
+        msg: 
+          - "Curl installation complete!"
+          - "Usage examples:"
+          - "  curl https://example.com                    # Basic GET request"
+          - "  curl -X POST -d 'data' https://example.com # POST request"
+          - "  curl -o file.txt https://example.com/file  # Download to file"
+          - "  curl -I https://example.com                # Headers only"
+
+  handlers:
+    - name: refresh package cache
+      package:
+        update_cache: yes

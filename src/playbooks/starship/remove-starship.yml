@@ -1,0 +1,164 @@
+---
+# Starship Prompt Removal Playbook
+# Removes starship based on installation method
+
+- name: Remove Starship across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Rolling release distributions (that might have native packages)
+    rolling_distributions:
+      - Archlinux
+      - Manjaro
+      - Fedora
+      - openSUSE Tumbleweed
+    
+    # Stable distributions (installed via script)
+    stable_distributions:
+      - Debian
+      - Ubuntu
+      - "Pop!_OS"
+      - "Linux Mint"
+      - elementary
+      - RedHat
+      - CentOS
+      - Rocky
+      - AlmaLinux
+      - "Amazon Linux"
+      - Alpine
+      - SLES
+      - "openSUSE Leap"
+    
+    # Distributions with native starship packages
+    starship_package_distributions:
+      - Archlinux
+      - Manjaro
+      - Fedora
+    
+    # Starship binary installation path
+    starship_binary_path: "/usr/local/bin/starship"
+
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Determine if distribution is rolling or stable
+      set_fact:
+        is_rolling_distribution: "{{ ansible_distribution in rolling_distributions }}"
+        is_stable_distribution: "{{ ansible_distribution in stable_distributions }}"
+        has_native_package: "{{ ansible_distribution in starship_package_distributions }}"
+
+    - name: Display distribution type and removal method
+      debug:
+        msg: 
+          - "Distribution type: {{ 'Rolling' if is_rolling_distribution else 'Stable' }}"
+          - "Removal method: {{ 'Package manager' if has_native_package else 'Binary removal' }}"
+
+    - name: Check if starship is currently installed
+      command: starship --version
+      register: starship_version_check
+      failed_when: false
+      changed_when: false
+
+    - name: Display current starship status
+      debug:
+        msg: "Starship is {{ 'installed: ' + (starship_version_check.stdout | regex_replace('\\n.*', '')) if starship_version_check.rc == 0 else 'not installed' }}"
+
+    - name: Skip removal if starship is not installed
+      debug:
+        msg: "Starship is not installed, nothing to remove"
+      when: starship_version_check.rc != 0
+
+    # Package manager removal (rolling distributions with native packages)
+    - name: Remove starship (Arch Linux)
+      pacman:
+        name: starship
+        state: absent
+      when: ansible_os_family == "Archlinux" and has_native_package and starship_version_check.rc == 0
+
+    - name: Remove starship (Fedora)
+      dnf:
+        name: starship
+        state: absent
+      when: ansible_os_family == "RedHat" and ansible_distribution == "Fedora" and has_native_package and starship_version_check.rc == 0
+
+    # Binary removal (stable distributions and rolling without native packages)
+    - name: Remove starship binary from /usr/local/bin
+      file:
+        path: "{{ starship_binary_path }}"
+        state: absent
+      when: not has_native_package and starship_version_check.rc == 0
+
+    # Shell integration removal
+    - name: Remove starship configuration from .bashrc
+      blockinfile:
+        path: "{{ ansible_env.HOME }}/.bashrc"
+        marker: "# {mark} Starship prompt configuration (added by pactopus)"
+        state: absent
+        backup: yes
+        owner: "{{ ansible_env.USER }}"
+        group: "{{ ansible_env.USER }}"
+      when: starship_version_check.rc == 0
+      become: no
+      register: bash_integration_removed
+
+    - name: Check for other starship references in .bashrc
+      shell: grep -n "starship" "{{ ansible_env.HOME }}/.bashrc" 2>/dev/null || echo "not_found"
+      register: bashrc_starship_check
+      changed_when: false
+      become: no
+      when: starship_version_check.rc == 0
+
+    - name: Display bashrc cleanup status
+      debug:
+        msg: "Additional starship references in .bashrc: {{ 'Found - manual cleanup may be needed' if bashrc_starship_check.stdout != 'not_found' else 'None found' }}"
+      when: starship_version_check.rc == 0 and bashrc_starship_check is defined
+
+    - name: Ask about configuration preservation
+      debug:
+        msg: 
+          - "Starship configuration preserved at: ~/.config/starship.toml"
+          - "To remove configuration: rm ~/.config/starship.toml"
+          - "Configuration contains your custom prompt settings"
+      when: starship_version_check.rc == 0
+
+    # Verification
+    - name: Verify starship removal
+      command: starship --version
+      register: starship_removal_check
+      failed_when: false
+      changed_when: false
+
+    - name: Display removal success
+      debug:
+        msg: "Starship has been successfully removed from the system"
+      when: starship_removal_check.rc != 0 and starship_version_check.rc == 0
+
+    - name: Display removal warning if still present
+      debug:
+        msg: "Warning: Starship may still be present on the system"
+      when: starship_removal_check.rc == 0
+
+    - name: Display removal method used
+      debug:
+        msg: "Removal method: {{ 'Package manager (' + ansible_pkg_mgr + ')' if has_native_package else 'Binary removal' }}"
+      when: starship_version_check.rc == 0
+
+    - name: Display post-removal notes
+      debug:
+        msg:
+          - "Starship removal complete!"
+          - "Method: {{ 'Native package removal' if has_native_package else 'Binary removal' }}"
+          - "Previous version: {{ starship_version_check.stdout | regex_replace('\\n.*', '') if starship_version_check.rc == 0 else 'Unknown' }}"
+          - ""
+          - "Post-removal notes:"
+          - "1. Your shell will return to the default prompt"
+          - "2. Restart your terminal to see changes: {{ 'done' if bash_integration_removed.changed else 'or run: source ~/.bashrc' }}"
+          - "3. Configuration preserved at: ~/.config/starship.toml"
+          - "4. To reinstall: pactopus install starship"
+          - "5. Manual bashrc cleanup: {{ 'may be needed' if bashrc_starship_check.stdout != 'not_found' else 'not required' }}"
+      when: starship_version_check.rc == 0

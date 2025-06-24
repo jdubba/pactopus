@@ -1,0 +1,176 @@
+---
+# Make Detection Test Playbook
+# Tests make installation detection across distributions
+# Useful for debugging package management issues
+
+- name: Test Make Detection across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: no
+  
+  vars:
+    # Package name mappings for different distributions
+    make_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.)
+      Debian: make
+      Ubuntu: make
+      "Pop!_OS": make
+      "Linux Mint": make
+      elementary: make
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: make
+      Fedora: make
+      CentOS: make
+      Rocky: make
+      AlmaLinux: make
+      # Arch family
+      Archlinux: make
+      Manjaro: make
+      # SUSE family
+      openSUSE: make
+      SLES: make
+      # Alpine
+      Alpine: make
+
+  tasks:
+    - name: Display system information
+      debug:
+        msg: 
+          - "OS Distribution: {{ ansible_distribution }}"
+          - "OS Version: {{ ansible_distribution_version }}"
+          - "OS Family: {{ ansible_os_family }}"
+          - "Architecture: {{ ansible_architecture }}"
+          - "Kernel: {{ ansible_kernel }}"
+      
+    - name: Test make command availability
+      command: which make
+      register: make_which
+      failed_when: false
+      changed_when: false
+      
+    - name: Display make binary location
+      debug:
+        msg: "Make binary found at: {{ make_which.stdout }}"
+      when: make_which.rc == 0
+      
+    - name: Display make not found message
+      debug:
+        msg: "Make binary not found in PATH"
+      when: make_which.rc != 0
+      
+    - name: Test make version command
+      command: make --version
+      register: make_version
+      failed_when: false
+      changed_when: false
+      
+    - name: Display make version
+      debug:
+        msg: "Make version: {{ make_version.stdout | regex_replace('\\n.*', '') }}"
+      when: make_version.rc == 0
+      
+    - name: Display make version error
+      debug:
+        msg: "Error getting make version: {{ make_version.stderr }}"
+      when: make_version.rc != 0
+      
+    - name: Create test Makefile for functionality test
+      copy:
+        content: |
+          # Test Makefile for pactopus make detection
+          .PHONY: test clean
+          
+          test:
+          	@echo "Make functionality test: SUCCESS"
+          
+          clean:
+          	@echo "Clean target works"
+        dest: /tmp/pactopus_make_test_Makefile
+        mode: '0644'
+      when: make_version.rc == 0
+      
+    - name: Test basic make functionality
+      shell: cd /tmp && make -f pactopus_make_test_Makefile test
+      register: make_test
+      failed_when: false
+      changed_when: false
+      when: make_version.rc == 0
+      
+    - name: Display make functionality test result
+      debug:
+        msg: "Make test output: {{ make_test.stdout }}"
+      when: make_version.rc == 0 and make_test.rc == 0
+      
+    - name: Display make functionality test error
+      debug:
+        msg: "Make test failed: {{ make_test.stderr }}"
+      when: make_version.rc == 0 and make_test.rc != 0
+      
+    - name: Clean up test Makefile
+      file:
+        path: /tmp/pactopus_make_test_Makefile
+        state: absent
+      when: make_version.rc == 0
+      
+    - name: Check package manager for make
+      debug:
+        msg: "Expected package name for {{ ansible_distribution }}: {{ make_packages[ansible_distribution] | default('make') }}"
+      
+    - name: Test package manager detection (Debian/Ubuntu)
+      command: dpkg -l make
+      register: dpkg_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "Debian"
+      
+    - name: Display dpkg check result
+      debug:
+        msg: "Package manager shows make is installed"
+      when: ansible_os_family == "Debian" and dpkg_check.rc == 0
+      
+    - name: Test package manager detection (RHEL/Fedora)
+      command: rpm -q make
+      register: rpm_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "RedHat"
+      
+    - name: Display rpm check result
+      debug:
+        msg: "Package manager shows make is installed: {{ rpm_check.stdout }}"
+      when: ansible_os_family == "RedHat" and rpm_check.rc == 0
+      
+    - name: Test package manager detection (Arch)
+      command: pacman -Q make
+      register: pacman_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "Archlinux"
+      
+    - name: Display pacman check result
+      debug:
+        msg: "Package manager shows make is installed: {{ pacman_check.stdout }}"
+      when: ansible_os_family == "Archlinux" and pacman_check.rc == 0
+      
+    - name: Test for GNU Make specific features
+      shell: make --version | head -1 | grep -i gnu
+      register: gnu_make_check
+      failed_when: false
+      changed_when: false
+      when: make_version.rc == 0
+      
+    - name: Display GNU Make detection
+      debug:
+        msg: "GNU Make detected: {{ gnu_make_check.stdout }}"
+      when: make_version.rc == 0 and gnu_make_check.rc == 0
+      
+    - name: Summary of make detection
+      debug:
+        msg:
+          - "=== MAKE DETECTION SUMMARY ==="
+          - "Binary available: {{ 'Yes' if make_which.rc == 0 else 'No' }}"
+          - "Version command works: {{ 'Yes' if make_version.rc == 0 else 'No' }}"
+          - "Functionality test: {{ 'Passed' if make_test.rc == 0 else 'Failed' if make_version.rc == 0 else 'Skipped' }}"
+          - "GNU Make: {{ 'Yes' if gnu_make_check.rc == 0 else 'No/Unknown' if make_version.rc == 0 else 'N/A' }}"
+          - "Package installed: {{ 'Yes' if (dpkg_check.rc == 0 and ansible_os_family == 'Debian') or (rpm_check.rc == 0 and ansible_os_family == 'RedHat') or (pacman_check.rc == 0 and ansible_os_family == 'Archlinux') else 'Unknown/No' }}"

@@ -1,0 +1,214 @@
+---
+# yai Installation Playbook
+# Cross-distribution yai (Your AI - AI CLI tool) installation
+# Repository: https://github.com/ekkinox/yai
+
+- name: Install yai across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: no
+  
+  vars:
+    # yai is primarily distributed as GitHub binary releases
+    # No major distributions package it yet
+    yai_packages: {}
+    
+    # All distributions use binary releases
+    rolling_distributions:
+      - Archlinux
+      - Manjaro
+      - Fedora
+      - openSUSE Tumbleweed
+    
+    stable_distributions:
+      - Debian
+      - Ubuntu
+      - "Pop!_OS"
+      - "Linux Mint"
+      - elementary
+      - RedHat
+      - CentOS
+      - Rocky
+      - AlmaLinux
+      - "Amazon Linux"
+      - Alpine
+      - SLES
+      - "openSUSE Leap"
+    
+    # yai binary release information
+    yai_repo: "ekkinox/yai"
+    yai_install_dir: "{{ ansible_env.HOME }}/.local/bin"
+    
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Display installation method
+      debug:
+        msg: "Installation method: GitHub binary release to ~/.local/bin"
+
+    - name: Check if yai is already installed
+      command: yai --help
+      register: yai_version_check
+      failed_when: false
+      changed_when: false
+
+    - name: Display current yai version if installed
+      debug:
+        msg: "yai is already installed and available"
+      when: yai_version_check.rc == 0
+
+    - name: Get latest yai release information from GitHub
+      uri:
+        url: "https://api.github.com/repos/{{ yai_repo }}/releases/latest"
+        method: GET
+        return_content: yes
+      register: yai_release_info
+
+    - name: Set yai version facts
+      set_fact:
+        yai_latest_version: "{{ yai_release_info.json.tag_name }}"
+        yai_download_url: "{{ yai_release_info.json.assets | selectattr('name', 'match', '^yai_.*_linux_amd64\\.tar\\.gz$') | map(attribute='browser_download_url') | list | first | default('') }}"
+      when: yai_release_info.status == 200
+
+    - name: Display latest yai version information
+      debug:
+        msg:
+          - "Latest yai version: {{ yai_latest_version }}"
+          - "Download URL: {{ yai_download_url }}"
+      when: yai_latest_version is defined and yai_download_url != ""
+
+    - name: Display download URL error
+      debug:
+        msg:
+          - "ERROR: Could not find Linux amd64 binary in yai release assets"
+          - "Available assets: {{ yai_release_info.json.assets | map(attribute='name') | list }}"
+      when: yai_latest_version is defined and yai_download_url == ""
+
+    - name: Create yai installation directory
+      file:
+        path: "{{ yai_install_dir }}"
+        state: directory
+        mode: '0755'
+      when: yai_latest_version is defined
+
+    - name: Check if current installation is up to date
+      shell: |
+        if [ -f "{{ yai_install_dir }}/yai" ]; then
+          # yai doesn't have a version flag, so we check if it's the same file size/date
+          # or simply assume it needs updating to be safe
+          echo "outdated"
+        else
+          echo "not_installed"
+        fi
+      register: yai_update_check
+      when: yai_latest_version is defined
+      changed_when: false
+
+    - name: Display update status
+      debug:
+        msg: "yai status: {{ yai_update_check.stdout }}"
+      when: yai_update_check is defined
+
+    - name: Download yai binary release
+      get_url:
+        url: "{{ yai_download_url }}"
+        dest: "/tmp/yai-{{ yai_latest_version }}.tar.gz"
+        mode: '0644'
+      when: yai_update_check.stdout != "up_to_date" and yai_download_url != ""
+      register: yai_download
+
+    - name: Extract yai binary release
+      unarchive:
+        src: "/tmp/yai-{{ yai_latest_version }}.tar.gz"
+        dest: "/tmp"
+        remote_src: yes
+      when: yai_download.changed
+      register: yai_extract
+
+    - name: Install yai binary to ~/.local/bin
+      copy:
+        src: "/tmp/yai"
+        dest: "{{ yai_install_dir }}/yai"
+        mode: '0755'
+        remote_src: yes
+      when: yai_extract.changed
+
+    - name: Clean up downloaded files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "/tmp/yai-{{ yai_latest_version }}.tar.gz"
+        - "/tmp/yai"
+        - "/tmp/LICENSE"
+        - "/tmp/README.md"
+      when: yai_download.changed
+
+    # Verification
+    - name: Verify yai installation
+      command: yai --help
+      register: yai_final_version
+      changed_when: false
+
+    - name: Display final yai version
+      debug:
+        msg: "yai installation complete: version {{ yai_latest_version }}"
+
+    - name: Check yai binary location
+      shell: which yai
+      register: yai_path
+      changed_when: false
+
+    - name: Display yai binary location
+      debug:
+        msg: "yai binary location: {{ yai_path.stdout }}"
+
+    - name: Test yai functionality
+      command: yai --help
+      register: yai_functionality_test
+      changed_when: false
+      failed_when: false
+
+    - name: Display yai usage and configuration hints
+      debug:
+        msg:
+          - "yai installation complete!"
+          - "Usage: yai [command] [options]           # AI CLI tool"
+          - "       yai ask \"question\"               # Ask AI a question"
+          - "       yai chat                          # Start interactive chat"
+          - "       yai config                        # Configure AI providers"
+          - "       yai --help                        # Show help"
+          - ""
+          - "Configuration:"
+          - "  First run: yai config                  # Set up API keys and providers"
+          - "  Config file: ~/.config/yai/config.yaml"
+          - ""
+          - "Examples:"
+          - "  yai ask \"How to use git rebase?\"      # Ask a question"
+          - "  yai chat                               # Interactive conversation"
+          - "  yai ask \"Explain this code\" < file.py # Analyze code"
+          - "  yai config set provider openai         # Set AI provider"
+          - ""
+          - "Supported AI Providers:"
+          - "  - OpenAI (ChatGPT)"
+          - "  - Anthropic (Claude)"
+          - "  - Google (Gemini)"
+          - "  - Local models (Ollama)"
+          - ""
+          - "Installation details:"
+          - "  Method: GitHub binary release to ~/.local/bin"
+          - "  Version: {{ yai_latest_version }}"
+          - "  Binary: {{ yai_path.stdout }}"
+          - ""
+          - "Next steps:"
+          - "  1. Run 'yai config' to set up your AI provider"
+          - "  2. Set API keys for your chosen provider"
+          - "  3. Start using with 'yai ask' or 'yai chat'"
+
+  handlers:
+    - name: refresh package cache
+      package:
+        update_cache: yes

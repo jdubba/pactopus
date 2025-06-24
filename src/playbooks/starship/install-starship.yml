@@ -1,0 +1,248 @@
+---
+# Starship Prompt Installation Playbook
+# Cross-platform starship shell prompt
+# Repository: https://github.com/starship/starship
+
+- name: Install Starship across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: no
+  
+  vars:
+    # Package name mappings for distributions that have starship packages
+    starship_packages:
+      # Arch family
+      Archlinux: starship
+      Manjaro: starship
+      # Fedora (COPR repository)
+      Fedora: starship
+    
+    # Rolling release distributions (prefer native packages when available)
+    rolling_distributions:
+      - Archlinux
+      - Manjaro
+      - Fedora
+      - openSUSE Tumbleweed
+    
+    # Stable distributions (use install script or binary)
+    stable_distributions:
+      - Debian
+      - Ubuntu
+      - "Pop!_OS"
+      - "Linux Mint"
+      - elementary
+      - RedHat
+      - CentOS
+      - Rocky
+      - AlmaLinux
+      - "Amazon Linux"
+      - Alpine
+      - SLES
+      - "openSUSE Leap"
+    
+    # Ubuntu-based distributions
+    ubuntu_derivatives:
+      - Ubuntu
+      - "Pop!_OS"
+      - "Linux Mint"
+      - elementary
+    
+    # Starship binary installation
+    starship_install_script: "https://starship.rs/install.sh"
+    starship_binary_path: "/usr/local/bin/starship"
+    
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Determine if distribution is rolling or stable
+      set_fact:
+        is_rolling_distribution: "{{ ansible_distribution in rolling_distributions }}"
+        is_stable_distribution: "{{ ansible_distribution in stable_distributions }}"
+
+    - name: Display distribution type and installation method
+      debug:
+        msg: 
+          - "Distribution type: {{ 'Rolling' if is_rolling_distribution else 'Stable' }}"
+          - "Installation method: {{ 'Native package' if is_rolling_distribution and ansible_distribution in starship_packages else 'Install script' }}"
+
+    - name: Check if starship is already installed
+      command: starship --version
+      register: starship_version_check
+      failed_when: false
+      changed_when: false
+
+    - name: Display current starship version if installed
+      debug:
+        msg: "Starship is already installed: {{ starship_version_check.stdout | regex_replace('\\n.*', '') }}"
+      when: starship_version_check.rc == 0
+
+    # Universal installation using the official install script
+    - name: Check if curl is available
+      command: which curl
+      register: curl_check
+      failed_when: false
+      changed_when: false
+
+    - name: Display curl availability
+      debug:
+        msg: "Curl: {{ 'Available' if curl_check.rc == 0 else 'Not available - required for starship installation' }}"
+
+    - name: Install starship via official install script (user space)
+      shell: |
+        export BIN_DIR="$HOME/.local/bin"
+        mkdir -p "$BIN_DIR"
+        curl -sS {{ starship_install_script }} | sh -s -- --yes
+      when: curl_check.rc == 0
+      register: starship_script_install
+
+    - name: Display curl installation error
+      debug:
+        msg: 
+          - "ERROR: curl command not found"
+          - "Starship requires curl for installation"
+          - "Please install curl first: pactopus install curl"
+      when: curl_check.rc != 0
+
+    # Verification for both installation methods
+    - name: Verify starship installation
+      command: starship --version
+      register: starship_final_version
+      changed_when: false
+
+    - name: Display final starship version
+      debug:
+        msg: "Starship installation complete: {{ starship_final_version.stdout | regex_replace('\\n.*', '') }}"
+
+    - name: Check starship binary location
+      shell: which starship
+      register: starship_path
+      changed_when: false
+
+    - name: Display starship binary location
+      debug:
+        msg: "Starship binary location: {{ starship_path.stdout }}"
+
+    - name: Display installation method used
+      debug:
+        msg: "Installation method: Official install script to ~/.local/bin"
+
+    - name: Create starship configuration directory
+      file:
+        path: "{{ ansible_env.HOME }}/.config"
+        state: directory
+        mode: '0755'
+
+    - name: Check if starship config already exists
+      stat:
+        path: "{{ ansible_env.HOME }}/.config/starship.toml"
+      register: starship_config_check
+
+    - name: Create basic starship configuration
+      copy:
+        content: |
+          # Starship configuration
+          # See https://starship.rs/config/ for more options
+          
+          format = """
+          [┌───────────────────────────────────────────────────────────────────────](bold green)
+          [│](bold green)$os$username$hostname$directory$git_branch$git_status$cmd_duration$line_break$python$character"""
+          
+          [os]
+          format = '[$symbol](bold white) '   
+          disabled = false
+          
+          [username]
+          style_user = 'bold blue'
+          style_root = 'bold red'
+          format = '[$user]($style) '
+          disabled = false
+          show_always = true
+          
+          [hostname]
+          ssh_only = false
+          format = 'on [$hostname](bold purple) '
+          disabled = false
+          
+          [directory]
+          style = 'bold cyan'
+          format = 'in [$path]($style)[$read_only]($read_only_style) '
+          
+          [git_branch]
+          symbol = '🌱 '
+          format = 'on [$symbol$branch]($style) '
+          style = 'bold green'
+          
+          [git_status]
+          format = '([\[$all_status$ahead_behind\]]($style) )'
+          style = 'bold red'
+          
+          [cmd_duration]
+          format = 'took [$duration]($style) '
+          style = 'bold yellow'
+          
+          [line_break]
+          disabled = false
+          
+          [character]
+          success_symbol = '[└─$](bold green) '
+          error_symbol = '[└─$](bold red) '
+        dest: "{{ ansible_env.HOME }}/.config/starship.toml"
+        mode: '0644'
+      when: not starship_config_check.stat.exists
+      register: starship_config_created
+
+    - name: Display configuration status
+      debug:
+        msg: "Starship configuration: {{ 'Created default config' if starship_config_created.changed else 'Using existing config' }}"
+
+    - name: Check shell integration status
+      shell: |
+        if grep -q "starship init" "{{ ansible_env.HOME }}/.bashrc" 2>/dev/null; then
+          echo "bash_configured"
+        else
+          echo "bash_not_configured"
+        fi
+      register: shell_integration_check
+      changed_when: false
+
+    - name: Add starship to bash configuration
+      blockinfile:
+        path: "{{ ansible_env.HOME }}/.bashrc"
+        marker: "# {mark} Starship prompt configuration (added by pactopus)"
+        block: |
+          # Initialize starship prompt
+          eval "$(starship init bash)"
+        create: yes
+        backup: yes
+      when: shell_integration_check.stdout == "bash_not_configured"
+      register: bash_integration_added
+
+    - name: Display starship usage and configuration hints
+      debug:
+        msg:
+          - "Starship installation complete!"
+          - "Usage: starship [command]              # Run starship commands"
+          - "       starship config                 # Show current configuration"
+          - "       starship preset                 # List available presets"
+          - ""
+          - "Configuration:"
+          - "  Config file: ~/.config/starship.toml"
+          - "  Documentation: https://starship.rs/config/"
+          - ""
+          - "Shell Integration:"
+          - "  Status: {{ 'Added to ~/.bashrc' if bash_integration_added.changed else 'Already configured' }}"
+          - "  To activate: restart terminal or run 'source ~/.bashrc'"
+          - ""
+          - "Installation details:"
+          - "  Method: Official install script to ~/.local/bin"
+          - "  Version: {{ starship_final_version.stdout | regex_replace('\\n.*', '') }}"
+          - "  Binary: {{ starship_path.stdout }}"
+          - "  Config: {{ 'Default created' if starship_config_created.changed else 'Existing preserved' }}"
+
+  handlers:
+    - name: refresh package cache
+      package:
+        update_cache: yes

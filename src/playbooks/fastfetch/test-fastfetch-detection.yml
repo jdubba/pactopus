@@ -1,0 +1,225 @@
+---
+# Fastfetch Detection Test Playbook
+# Tests fastfetch installation detection across distributions
+# Useful for debugging package management issues
+
+- name: Test Fastfetch Detection across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: no
+  
+  vars:
+    # Package name mappings for different distributions
+    fastfetch_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.)
+      Debian: fastfetch
+      Ubuntu: fastfetch
+      "Pop!_OS": fastfetch
+      "Linux Mint": fastfetch
+      elementary: fastfetch
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: fastfetch
+      Fedora: fastfetch
+      CentOS: fastfetch
+      Rocky: fastfetch
+      AlmaLinux: fastfetch
+      # Arch family
+      Archlinux: fastfetch
+      Manjaro: fastfetch
+      # SUSE family
+      openSUSE: fastfetch
+      SLES: fastfetch
+      # Alpine
+      Alpine: fastfetch
+
+  tasks:
+    - name: Display system information
+      debug:
+        msg: 
+          - "OS Distribution: {{ ansible_distribution }}"
+          - "OS Version: {{ ansible_distribution_version }}"
+          - "OS Family: {{ ansible_os_family }}"
+          - "Architecture: {{ ansible_architecture }}"
+          - "Kernel: {{ ansible_kernel }}"
+      
+    - name: Test fastfetch command availability
+      command: which fastfetch
+      register: fastfetch_which
+      failed_when: false
+      changed_when: false
+      
+    - name: Display fastfetch binary location
+      debug:
+        msg: "Fastfetch binary found at: {{ fastfetch_which.stdout }}"
+      when: fastfetch_which.rc == 0
+      
+    - name: Display fastfetch not found message
+      debug:
+        msg: "Fastfetch binary not found in PATH"
+      when: fastfetch_which.rc != 0
+      
+    - name: Test fastfetch version command
+      command: fastfetch --version
+      register: fastfetch_version
+      failed_when: false
+      changed_when: false
+      
+    - name: Display fastfetch version
+      debug:
+        msg: "Fastfetch version: {{ fastfetch_version.stdout | regex_replace('\\n.*', '') }}"
+      when: fastfetch_version.rc == 0
+      
+    - name: Display fastfetch version error
+      debug:
+        msg: "Error getting fastfetch version: {{ fastfetch_version.stderr }}"
+      when: fastfetch_version.rc != 0
+      
+    - name: Test fastfetch help command
+      command: fastfetch --help
+      register: fastfetch_help
+      failed_when: false
+      changed_when: false
+      when: fastfetch_version.rc == 0
+      
+    - name: Test fastfetch list presets
+      command: fastfetch --list-presets
+      register: fastfetch_presets
+      failed_when: false
+      changed_when: false
+      when: fastfetch_version.rc == 0
+      
+    - name: Display available presets
+      debug:
+        msg: "Available presets: {{ fastfetch_presets.stdout_lines | join(', ') }}"
+      when: fastfetch_version.rc == 0 and fastfetch_presets.rc == 0
+      
+    - name: Test basic fastfetch functionality (minimal output)
+      shell: fastfetch --logo none --format json 2>/dev/null | head -1
+      register: fastfetch_test
+      failed_when: false
+      changed_when: false
+      when: fastfetch_version.rc == 0
+      
+    - name: Display fastfetch functionality test result
+      debug:
+        msg: "Fastfetch JSON test: {{ 'PASSED' if 'Title' in fastfetch_test.stdout or '{' in fastfetch_test.stdout else 'FAILED' }}"
+      when: fastfetch_version.rc == 0 and fastfetch_test.rc == 0
+      
+    - name: Display fastfetch functionality test error
+      debug:
+        msg: "Fastfetch test failed: {{ fastfetch_test.stderr }}"
+      when: fastfetch_version.rc == 0 and fastfetch_test.rc != 0
+      
+    - name: Check for fastfetch configuration directory
+      stat:
+        path: "{{ ansible_env.HOME }}/.config/fastfetch"
+      register: fastfetch_config_exists
+      when: fastfetch_version.rc == 0
+      
+    - name: Display configuration directory status
+      debug:
+        msg: "Configuration directory: {{ 'Exists' if fastfetch_config_exists.stat.exists else 'Not found' }} at ~/.config/fastfetch"
+      when: fastfetch_version.rc == 0
+      
+    - name: Check for default fastfetch config files
+      stat:
+        path: "{{ item }}"
+      register: fastfetch_config_files
+      loop:
+        - "{{ ansible_env.HOME }}/.config/fastfetch/config.jsonc"
+        - "{{ ansible_env.HOME }}/.config/fastfetch/config.conf"
+        - "/etc/fastfetch/config.jsonc"
+        - "/usr/share/fastfetch/presets"
+      when: fastfetch_version.rc == 0
+      
+    - name: Display configuration files found
+      debug:
+        msg: "Config file found: {{ item.item }}"
+      loop: "{{ fastfetch_config_files.results }}"
+      when: fastfetch_version.rc == 0 and item.stat.exists
+      
+    - name: Test fastfetch modules list
+      command: fastfetch --list-modules
+      register: fastfetch_modules
+      failed_when: false
+      changed_when: false
+      when: fastfetch_version.rc == 0
+      
+    - name: Count available modules
+      set_fact:
+        module_count: "{{ fastfetch_modules.stdout_lines | length }}"
+      when: fastfetch_version.rc == 0 and fastfetch_modules.rc == 0
+      
+    - name: Display modules information
+      debug:
+        msg: "Available modules: {{ module_count | default('0') }}"
+      when: fastfetch_version.rc == 0
+      
+    - name: Check package manager for fastfetch
+      debug:
+        msg: "Expected package name for {{ ansible_distribution }}: {{ fastfetch_packages[ansible_distribution] | default('fastfetch') }}"
+      
+    - name: Test package manager detection (Debian/Ubuntu)
+      command: dpkg -l fastfetch
+      register: dpkg_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "Debian"
+      
+    - name: Display dpkg check result
+      debug:
+        msg: "Package manager shows fastfetch is installed"
+      when: ansible_os_family == "Debian" and dpkg_check.rc == 0
+      
+    - name: Test package manager detection (RHEL/Fedora)
+      command: rpm -q fastfetch
+      register: rpm_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "RedHat"
+      
+    - name: Display rpm check result
+      debug:
+        msg: "Package manager shows fastfetch is installed: {{ rpm_check.stdout }}"
+      when: ansible_os_family == "RedHat" and rpm_check.rc == 0
+      
+    - name: Test package manager detection (Arch)
+      command: pacman -Q fastfetch
+      register: pacman_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "Archlinux"
+      
+    - name: Display pacman check result
+      debug:
+        msg: "Package manager shows fastfetch is installed: {{ pacman_check.stdout }}"
+      when: ansible_os_family == "Archlinux" and pacman_check.rc == 0
+      
+    - name: Check if fastfetch is manually installed
+      stat:
+        path: /usr/local/bin/fastfetch
+      register: manual_install_check
+      when: fastfetch_version.rc == 0 and (dpkg_check.rc != 0 or rpm_check.rc != 0 or pacman_check.rc != 0)
+      
+    - name: Display manual installation detection
+      debug:
+        msg: "Fastfetch appears to be manually installed in /usr/local/bin"
+      when: fastfetch_version.rc == 0 and manual_install_check.stat.exists
+      
+    - name: Count configuration files found
+      set_fact:
+        config_files_count: "{{ fastfetch_config_files.results | selectattr('stat.exists') | list | length }}"
+      when: fastfetch_version.rc == 0
+      
+    - name: Summary of fastfetch detection
+      debug:
+        msg:
+          - "=== FASTFETCH DETECTION SUMMARY ==="
+          - "Binary available: {{ 'Yes' if fastfetch_which.rc == 0 else 'No' }}"
+          - "Version command works: {{ 'Yes' if fastfetch_version.rc == 0 else 'No' }}"
+          - "Functionality test: {{ 'Passed' if fastfetch_test.rc == 0 and ('Title' in fastfetch_test.stdout or '{' in fastfetch_test.stdout) else 'Failed' if fastfetch_version.rc == 0 else 'Skipped' }}"
+          - "Help command works: {{ 'Yes' if fastfetch_help.rc == 0 else 'No' if fastfetch_version.rc == 0 else 'N/A' }}"
+          - "Available modules: {{ module_count | default('Unknown') }}"
+          - "Configuration files: {{ config_files_count | default('0') }} found"
+          - "Package installed: {{ 'Yes' if (dpkg_check.rc == 0 and ansible_os_family == 'Debian') or (rpm_check.rc == 0 and ansible_os_family == 'RedHat') or (pacman_check.rc == 0 and ansible_os_family == 'Archlinux') else 'Manual/Unknown' if fastfetch_version.rc == 0 else 'No' }}"

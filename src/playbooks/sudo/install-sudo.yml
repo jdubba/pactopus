@@ -1,0 +1,132 @@
+---
+# Sudo Installation Playbook
+# Cross-distribution sudo package installation
+# sudo allows users to run commands with elevated privileges
+
+- name: Install sudo across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Package name mappings for different distributions
+    sudo_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.)
+      Debian: sudo
+      Ubuntu: sudo
+      "Pop!_OS": sudo
+      "Linux Mint": sudo
+      elementary: sudo
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: sudo
+      Fedora: sudo
+      CentOS: sudo
+      Rocky: sudo
+      AlmaLinux: sudo
+      # Arch family
+      Archlinux: sudo
+      Manjaro: sudo
+      # SUSE family
+      openSUSE: sudo
+      SLES: sudo
+      # Alpine
+      Alpine: sudo
+    
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Show package name for this distribution
+      debug:
+        msg: "Sudo package name for {{ ansible_distribution }}: {{ sudo_packages[ansible_distribution] | default('sudo') }}"
+
+    - name: Check if sudo is already installed
+      command: sudo --version
+      register: sudo_version_check
+      failed_when: false
+      changed_when: false
+
+    - name: Display current sudo version if installed
+      debug:
+        msg: "Sudo is already installed: {{ sudo_version_check.stdout | regex_replace('\\n.*', '') }}"
+      when: sudo_version_check.rc == 0
+
+    - name: Show what would be installed
+      debug:
+        msg: "{{ 'Sudo is already up to date' if sudo_version_check.rc == 0 else 'Will install sudo package' }}"
+
+    - name: Show installation command that would be used
+      debug:
+        msg: "Installation method: {{ ansible_pkg_mgr }}"
+
+    - name: Ensure package cache is updated
+      package:
+        update_cache: yes
+
+    - name: Install/upgrade sudo (Debian/Ubuntu)
+      apt:
+        name: "{{ sudo_packages[ansible_distribution] | default('sudo') }}"
+        state: latest
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Install/upgrade sudo (RedHat/Fedora)
+      dnf:
+        name: "{{ sudo_packages[ansible_distribution] | default('sudo') }}"
+        state: latest
+      when: ansible_os_family == "RedHat"
+
+    - name: Install/upgrade sudo (Arch Linux)
+      pacman:
+        name: "{{ sudo_packages[ansible_distribution] | default('sudo') }}"
+        state: latest
+      when: ansible_os_family == "Archlinux"
+
+    - name: Install/upgrade sudo (SUSE)
+      zypper:
+        name: "{{ sudo_packages[ansible_distribution] | default('sudo') }}"
+        state: latest
+      when: ansible_os_family == "Suse"
+
+    - name: Install/upgrade sudo (Alpine)
+      apk:
+        name: "{{ sudo_packages[ansible_distribution] | default('sudo') }}"
+        state: latest
+      when: ansible_os_family == "Alpine"
+
+    - name: Verify sudo installation
+      command: sudo --version
+      register: sudo_final_version
+      changed_when: false
+
+    - name: Display final sudo version
+      debug:
+        msg: "Sudo installation complete: {{ sudo_final_version.stdout | regex_replace('\\n.*', '') }}"
+
+    - name: Display sudo usage and security hints
+      debug:
+        msg:
+          - "Sudo installation complete!"
+          - "Usage: sudo [command]              # Run command with elevated privileges"
+          - "       sudo -u user [command]      # Run command as specific user"
+          - "       sudo -i                     # Start interactive shell as root"
+          - "       sudo -s                     # Start shell as root"
+          - "       sudo --help                 # Show all options"
+          - ""
+          - "Security reminders:"
+          - "  - Only grant sudo access to trusted users"
+          - "  - Configure /etc/sudoers carefully (use 'visudo')"
+          - "  - Consider using sudo groups instead of individual user permissions"
+          - "  - Review sudo logs regularly"
+          - ""
+          - "Configuration:"
+          - "  Main config: /etc/sudoers (edit with 'visudo')"
+          - "  User groups: add users to 'sudo' or 'wheel' group"
+          - "  Logs: typically in /var/log/auth.log or /var/log/secure"
+
+  handlers:
+    - name: refresh package cache
+      package:
+        update_cache: yes

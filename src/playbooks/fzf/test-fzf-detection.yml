@@ -1,0 +1,196 @@
+---
+# FZF Detection Test Playbook
+# Tests fzf installation detection across distributions
+# Useful for debugging package management issues
+
+- name: Test FZF Detection across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: no
+  
+  vars:
+    # Package name mappings for different distributions
+    fzf_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.)
+      Debian: fzf
+      Ubuntu: fzf
+      "Pop!_OS": fzf
+      "Linux Mint": fzf
+      elementary: fzf
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: fzf
+      Fedora: fzf
+      CentOS: fzf
+      Rocky: fzf
+      AlmaLinux: fzf
+      # Arch family
+      Archlinux: fzf
+      Manjaro: fzf
+      # SUSE family
+      openSUSE: fzf
+      SLES: fzf
+      # Alpine
+      Alpine: fzf
+
+  tasks:
+    - name: Display system information
+      debug:
+        msg: 
+          - "OS Distribution: {{ ansible_distribution }}"
+          - "OS Version: {{ ansible_distribution_version }}"
+          - "OS Family: {{ ansible_os_family }}"
+          - "Architecture: {{ ansible_architecture }}"
+          - "Kernel: {{ ansible_kernel }}"
+      
+    - name: Test fzf command availability
+      command: which fzf
+      register: fzf_which
+      failed_when: false
+      changed_when: false
+      
+    - name: Display fzf binary location
+      debug:
+        msg: "FZF binary found at: {{ fzf_which.stdout }}"
+      when: fzf_which.rc == 0
+      
+    - name: Display fzf not found message
+      debug:
+        msg: "FZF binary not found in PATH"
+      when: fzf_which.rc != 0
+      
+    - name: Test fzf version command
+      command: fzf --version
+      register: fzf_version
+      failed_when: false
+      changed_when: false
+      
+    - name: Display fzf version
+      debug:
+        msg: "FZF version: {{ fzf_version.stdout | regex_replace('\\n.*', '') }}"
+      when: fzf_version.rc == 0
+      
+    - name: Display fzf version error
+      debug:
+        msg: "Error getting fzf version: {{ fzf_version.stderr }}"
+      when: fzf_version.rc != 0
+      
+    - name: Create test data for fzf functionality test
+      copy:
+        content: |
+          apple
+          banana
+          cherry
+          date
+          elderberry
+          fig
+          grape
+          honeydew
+        dest: /tmp/pactopus_fzf_test_data.txt
+        mode: '0644'
+      when: fzf_version.rc == 0
+      
+    - name: Test basic fzf functionality with filter
+      shell: echo "ap" | fzf --filter="ap" < /tmp/pactopus_fzf_test_data.txt
+      register: fzf_test
+      failed_when: false
+      changed_when: false
+      when: fzf_version.rc == 0
+      
+    - name: Display fzf functionality test result
+      debug:
+        msg: "FZF filter test output: {{ fzf_test.stdout }}"
+      when: fzf_version.rc == 0 and fzf_test.rc == 0
+      
+    - name: Display fzf functionality test error
+      debug:
+        msg: "FZF test failed: {{ fzf_test.stderr }}"
+      when: fzf_version.rc == 0 and fzf_test.rc != 0
+      
+    - name: Test fzf help command
+      command: fzf --help
+      register: fzf_help
+      failed_when: false
+      changed_when: false
+      when: fzf_version.rc == 0
+      
+    - name: Check for fzf shell integration files
+      stat:
+        path: "{{ item }}"
+      register: fzf_shell_files
+      loop:
+        - /usr/share/fzf/shell/key-bindings.bash
+        - /usr/share/fzf/shell/completion.bash
+        - /usr/share/fzf/shell/key-bindings.zsh
+        - /usr/share/fzf/shell/completion.zsh
+        - /usr/local/share/fzf/shell/key-bindings.bash
+        - /usr/local/share/fzf/shell/completion.bash
+      when: fzf_version.rc == 0
+      
+    - name: Display available shell integration files
+      debug:
+        msg: "Shell integration file found: {{ item.item }}"
+      loop: "{{ fzf_shell_files.results }}"
+      when: fzf_version.rc == 0 and item.stat.exists
+      
+    - name: Clean up test data
+      file:
+        path: /tmp/pactopus_fzf_test_data.txt
+        state: absent
+      when: fzf_version.rc == 0
+      
+    - name: Check package manager for fzf
+      debug:
+        msg: "Expected package name for {{ ansible_distribution }}: {{ fzf_packages[ansible_distribution] | default('fzf') }}"
+      
+    - name: Test package manager detection (Debian/Ubuntu)
+      command: dpkg -l fzf
+      register: dpkg_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "Debian"
+      
+    - name: Display dpkg check result
+      debug:
+        msg: "Package manager shows fzf is installed"
+      when: ansible_os_family == "Debian" and dpkg_check.rc == 0
+      
+    - name: Test package manager detection (RHEL/Fedora)
+      command: rpm -q fzf
+      register: rpm_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "RedHat"
+      
+    - name: Display rpm check result
+      debug:
+        msg: "Package manager shows fzf is installed: {{ rpm_check.stdout }}"
+      when: ansible_os_family == "RedHat" and rpm_check.rc == 0
+      
+    - name: Test package manager detection (Arch)
+      command: pacman -Q fzf
+      register: pacman_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "Archlinux"
+      
+    - name: Display pacman check result
+      debug:
+        msg: "Package manager shows fzf is installed: {{ pacman_check.stdout }}"
+      when: ansible_os_family == "Archlinux" and pacman_check.rc == 0
+      
+    - name: Count available shell integrations
+      set_fact:
+        shell_integration_count: "{{ fzf_shell_files.results | selectattr('stat.exists') | list | length }}"
+      when: fzf_version.rc == 0
+      
+    - name: Summary of fzf detection
+      debug:
+        msg:
+          - "=== FZF DETECTION SUMMARY ==="
+          - "Binary available: {{ 'Yes' if fzf_which.rc == 0 else 'No' }}"
+          - "Version command works: {{ 'Yes' if fzf_version.rc == 0 else 'No' }}"
+          - "Functionality test: {{ 'Passed' if fzf_test.rc == 0 else 'Failed' if fzf_version.rc == 0 else 'Skipped' }}"
+          - "Help command works: {{ 'Yes' if fzf_help.rc == 0 else 'No' if fzf_version.rc == 0 else 'N/A' }}"
+          - "Shell integrations: {{ shell_integration_count | default('0') }} files found"
+          - "Package installed: {{ 'Yes' if (dpkg_check.rc == 0 and ansible_os_family == 'Debian') or (rpm_check.rc == 0 and ansible_os_family == 'RedHat') or (pacman_check.rc == 0 and ansible_os_family == 'Archlinux') else 'Unknown/No' }}"

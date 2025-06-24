@@ -1,0 +1,126 @@
+---
+# Ripgrep Removal Playbook
+# Cross-distribution ripgrep removal with package name mapping
+# Supports: Debian/Ubuntu, RHEL/Fedora/CentOS, Arch, SUSE, Alpine
+
+- name: Remove Ripgrep across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Package name mappings for different distributions
+    ripgrep_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.)
+      Debian: ripgrep
+      Ubuntu: ripgrep
+      "Pop!_OS": ripgrep
+      "Linux Mint": ripgrep
+      elementary: ripgrep
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: ripgrep
+      Fedora: ripgrep
+      CentOS: ripgrep
+      Rocky: ripgrep
+      AlmaLinux: ripgrep
+      # Arch family
+      Archlinux: ripgrep
+      Manjaro: ripgrep
+      # SUSE family
+      openSUSE: ripgrep
+      SLES: ripgrep
+      # Alpine
+      Alpine: ripgrep
+
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+      
+    - name: Check if ripgrep is currently installed
+      command: rg --version
+      register: ripgrep_version_check
+      failed_when: false
+      changed_when: false
+      
+    - name: Display current ripgrep version if installed
+      debug:
+        msg: "Ripgrep is currently installed: {{ ripgrep_version_check.stdout | regex_replace('\\n.*', '') }}"
+      when: ripgrep_version_check.rc == 0
+      
+    - name: Skip removal if ripgrep is not installed
+      debug:
+        msg: "Ripgrep is not installed, nothing to remove"
+      when: ripgrep_version_check.rc != 0
+      
+    - name: Remove ripgrep (Debian/Ubuntu)
+      apt:
+        name: "{{ ripgrep_packages[ansible_distribution] | default('ripgrep') }}"
+        state: absent
+      when: ansible_os_family == "Debian" and ripgrep_version_check.rc == 0
+      
+    - name: Remove ripgrep (RHEL/Fedora/CentOS)
+      dnf:
+        name: "{{ ripgrep_packages[ansible_distribution] | default('ripgrep') }}"
+        state: absent
+      when: ansible_os_family == "RedHat" and ripgrep_version_check.rc == 0
+      ignore_errors: yes
+      
+    - name: Remove ripgrep (RHEL/CentOS with yum fallback)
+      yum:
+        name: "{{ ripgrep_packages[ansible_distribution] | default('ripgrep') }}"
+        state: absent
+      when: ansible_os_family == "RedHat" and ripgrep_version_check.rc == 0 and ansible_distribution_major_version|int < 8
+      ignore_errors: yes
+      
+    - name: Remove ripgrep (Arch Linux)
+      pacman:
+        name: "{{ ripgrep_packages[ansible_distribution] | default('ripgrep') }}"
+        state: absent
+      when: ansible_os_family == "Archlinux" and ripgrep_version_check.rc == 0
+      
+    - name: Remove ripgrep (SUSE)
+      zypper:
+        name: "{{ ripgrep_packages[ansible_distribution] | default('ripgrep') }}"
+        state: absent
+      when: ansible_os_family == "Suse" and ripgrep_version_check.rc == 0
+      
+    - name: Remove ripgrep (Alpine)
+      apk:
+        name: "{{ ripgrep_packages[ansible_distribution] | default('ripgrep') }}"
+        state: absent
+      when: ansible_os_family == "Alpine" and ripgrep_version_check.rc == 0
+      
+    - name: Verify ripgrep removal
+      command: rg --version
+      register: ripgrep_removal_check
+      failed_when: false
+      changed_when: false
+      
+    - name: Display removal success
+      debug:
+        msg: "Ripgrep has been successfully removed"
+      when: ripgrep_removal_check.rc != 0
+      
+    - name: Display removal warning if still present
+      debug:
+        msg: "Warning: Ripgrep may still be present on the system"
+      when: ripgrep_removal_check.rc == 0
+      
+    - name: Display manual removal note
+      debug:
+        msg: 
+          - "Note: If ripgrep was installed manually from GitHub releases,"
+          - "you may need to remove it manually from the installation location"
+          - "Common locations: /usr/local/bin/rg, ~/bin/rg, ~/.cargo/bin/rg"
+      when: ripgrep_removal_check.rc == 0
+      
+    - name: Display alternatives note
+      debug:
+        msg: 
+          - "Note: After removing ripgrep (rg), you can use these alternatives:"
+          - "  - grep: Traditional text search (slower but universal)"
+          - "  - ag (the_silver_searcher): Fast code search tool"  
+          - "  - ack: Perl-based text search tool"
+      when: ripgrep_removal_check.rc != 0

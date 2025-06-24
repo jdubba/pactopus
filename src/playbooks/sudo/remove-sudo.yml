@@ -1,0 +1,101 @@
+---
+# Sudo Removal Playbook
+# Cross-distribution sudo package removal
+# WARNING: Removing sudo can make system administration difficult
+
+- name: Remove sudo across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Check if sudo is currently installed
+      command: sudo --version
+      register: sudo_version_check
+      failed_when: false
+      changed_when: false
+
+    - name: Display current sudo status
+      debug:
+        msg: "Sudo is {{ 'currently installed' if sudo_version_check.rc == 0 else 'not installed' }}"
+
+    - name: Skip removal if sudo is not installed
+      debug:
+        msg: "Sudo is not installed, nothing to remove"
+      when: sudo_version_check.rc != 0
+
+    - name: Warning about sudo removal
+      debug:
+        msg: 
+          - "WARNING: Removing sudo will disable privilege escalation for non-root users!"
+          - "This may make system administration very difficult."
+          - "Ensure you have alternative admin access before proceeding."
+          - "Consider using 'su' or direct root login instead of removing sudo."
+      when: sudo_version_check.rc == 0
+
+    - name: Remove sudo (Debian/Ubuntu)
+      apt:
+        name: sudo
+        state: absent
+        autoremove: yes
+      when: ansible_os_family == "Debian" and sudo_version_check.rc == 0
+
+    - name: Remove sudo (RedHat/Fedora)
+      dnf:
+        name: sudo
+        state: absent
+      when: ansible_os_family == "RedHat" and sudo_version_check.rc == 0
+
+    - name: Remove sudo (Arch Linux)
+      pacman:
+        name: sudo
+        state: absent
+      when: ansible_os_family == "Archlinux" and sudo_version_check.rc == 0
+
+    - name: Remove sudo (SUSE)
+      zypper:
+        name: sudo
+        state: absent
+      when: ansible_os_family == "Suse" and sudo_version_check.rc == 0
+
+    - name: Remove sudo (Alpine)
+      apk:
+        name: sudo
+        state: absent
+      when: ansible_os_family == "Alpine" and sudo_version_check.rc == 0
+
+    - name: Verify sudo removal
+      command: sudo --version
+      register: sudo_removal_check
+      failed_when: false
+      changed_when: false
+
+    - name: Display removal success
+      debug:
+        msg: "Sudo has been successfully removed from the system"
+      when: sudo_removal_check.rc != 0 and sudo_version_check.rc == 0
+
+    - name: Display removal warning if still present
+      debug:
+        msg: "Warning: Sudo may still be present on the system"
+      when: sudo_removal_check.rc == 0
+
+    - name: Display post-removal notes
+      debug:
+        msg:
+          - "Sudo removal complete!"
+          - "IMPORTANT: Administrative privileges are now limited!"
+          - ""
+          - "Alternative privilege escalation methods:"
+          - "  - 'su' command (switch to root user)"
+          - "  - Direct root login"
+          - "  - pkexec (if PolicyKit is available)"
+          - ""
+          - "To reinstall sudo: pactopus install sudo"
+          - "Note: You may need root access to reinstall"
+      when: sudo_removal_check.rc != 0 and sudo_version_check.rc == 0

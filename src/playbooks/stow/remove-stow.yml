@@ -1,0 +1,109 @@
+---
+# Stow Removal Playbook
+# Cross-distribution stow removal with package name mapping
+# Supports: Debian/Ubuntu, RHEL/Fedora/CentOS, Arch, SUSE, Alpine
+
+- name: Remove Stow across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Package name mappings for different distributions
+    stow_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.)
+      Debian: stow
+      Ubuntu: stow
+      "Pop!_OS": stow
+      "Linux Mint": stow
+      elementary: stow
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: stow
+      Fedora: stow
+      CentOS: stow
+      Rocky: stow
+      AlmaLinux: stow
+      # Arch family
+      Archlinux: stow
+      Manjaro: stow
+      # SUSE family
+      openSUSE: stow
+      SLES: stow
+      # Alpine
+      Alpine: stow
+
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+      
+    - name: Check if stow is currently installed
+      command: stow --version
+      register: stow_version_check
+      failed_when: false
+      changed_when: false
+      
+    - name: Display current stow version if installed
+      debug:
+        msg: "Stow is currently installed: {{ stow_version_check.stdout | regex_replace('\\n.*', '') }}"
+      when: stow_version_check.rc == 0
+      
+    - name: Skip removal if stow is not installed
+      debug:
+        msg: "Stow is not installed, nothing to remove"
+      when: stow_version_check.rc != 0
+      
+    - name: Remove stow (Debian/Ubuntu)
+      apt:
+        name: "{{ stow_packages[ansible_distribution] | default('stow') }}"
+        state: absent
+      when: ansible_os_family == "Debian" and stow_version_check.rc == 0
+      
+    - name: Remove stow (RHEL/Fedora/CentOS)
+      dnf:
+        name: "{{ stow_packages[ansible_distribution] | default('stow') }}"
+        state: absent
+      when: ansible_os_family == "RedHat" and stow_version_check.rc == 0
+      ignore_errors: yes
+      
+    - name: Remove stow (RHEL/CentOS with yum fallback)
+      yum:
+        name: "{{ stow_packages[ansible_distribution] | default('stow') }}"
+        state: absent
+      when: ansible_os_family == "RedHat" and stow_version_check.rc == 0 and ansible_distribution_major_version|int < 8
+      ignore_errors: yes
+      
+    - name: Remove stow (Arch Linux)
+      pacman:
+        name: "{{ stow_packages[ansible_distribution] | default('stow') }}"
+        state: absent
+      when: ansible_os_family == "Archlinux" and stow_version_check.rc == 0
+      
+    - name: Remove stow (SUSE)
+      zypper:
+        name: "{{ stow_packages[ansible_distribution] | default('stow') }}"
+        state: absent
+      when: ansible_os_family == "Suse" and stow_version_check.rc == 0
+      
+    - name: Remove stow (Alpine)
+      apk:
+        name: "{{ stow_packages[ansible_distribution] | default('stow') }}"
+        state: absent
+      when: ansible_os_family == "Alpine" and stow_version_check.rc == 0
+      
+    - name: Verify stow removal
+      command: stow --version
+      register: stow_removal_check
+      failed_when: false
+      changed_when: false
+      
+    - name: Display removal success
+      debug:
+        msg: "Stow has been successfully removed"
+      when: stow_removal_check.rc != 0
+      
+    - name: Display removal warning if still present
+      debug:
+        msg: "Warning: Stow may still be present on the system"
+      when: stow_removal_check.rc == 0

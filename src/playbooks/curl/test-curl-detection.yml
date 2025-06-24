@@ -1,0 +1,207 @@
+---
+# Curl Detection Test Playbook
+# Tests curl installation detection across distributions
+# Useful for debugging package management issues
+
+- name: Test Curl Detection across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: no
+  
+  vars:
+    # Package name mappings for different distributions
+    curl_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.)
+      Debian: curl
+      Ubuntu: curl
+      "Pop!_OS": curl
+      "Linux Mint": curl
+      elementary: curl
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: curl
+      Fedora: curl
+      CentOS: curl
+      Rocky: curl
+      AlmaLinux: curl
+      # Arch family
+      Archlinux: curl
+      Manjaro: curl
+      # SUSE family
+      openSUSE: curl
+      SLES: curl
+      # Alpine
+      Alpine: curl
+
+  tasks:
+    - name: Display system information
+      debug:
+        msg: 
+          - "OS Distribution: {{ ansible_distribution }}"
+          - "OS Version: {{ ansible_distribution_version }}"
+          - "OS Family: {{ ansible_os_family }}"
+          - "Architecture: {{ ansible_architecture }}"
+          - "Kernel: {{ ansible_kernel }}"
+      
+    - name: Test curl command availability
+      command: which curl
+      register: curl_which
+      failed_when: false
+      changed_when: false
+      
+    - name: Display curl binary location
+      debug:
+        msg: "Curl binary found at: {{ curl_which.stdout }}"
+      when: curl_which.rc == 0
+      
+    - name: Display curl not found message
+      debug:
+        msg: "Curl binary not found in PATH"
+      when: curl_which.rc != 0
+      
+    - name: Test curl version command
+      command: curl --version
+      register: curl_version
+      failed_when: false
+      changed_when: false
+      
+    - name: Display curl version
+      debug:
+        msg: "Curl version: {{ curl_version.stdout | regex_replace('\\n.*', '') }}"
+      when: curl_version.rc == 0
+      
+    - name: Display curl version error
+      debug:
+        msg: "Error getting curl version: {{ curl_version.stderr }}"
+      when: curl_version.rc != 0
+      
+    - name: Extract curl features and protocols
+      shell: curl --version | grep -E "(Protocols|Features):"
+      register: curl_capabilities
+      failed_when: false
+      changed_when: false
+      when: curl_version.rc == 0
+      
+    - name: Display curl capabilities
+      debug:
+        msg: "{{ curl_capabilities.stdout }}"
+      when: curl_version.rc == 0 and curl_capabilities.rc == 0
+      
+    - name: Test basic curl functionality with HTTP
+      uri:
+        url: https://httpbin.org/json
+        method: GET
+        return_content: yes
+      register: curl_http_test
+      failed_when: false
+      when: curl_version.rc == 0
+      
+    - name: Display HTTP test result
+      debug:
+        msg: "HTTP functionality test: {{ 'PASSED' if curl_http_test.status == 200 else 'FAILED' }}"
+      when: curl_version.rc == 0
+      
+    - name: Test curl with command line (fallback test)
+      shell: curl -s --max-time 5 https://httpbin.org/json | head -1
+      register: curl_cli_test
+      failed_when: false
+      changed_when: false
+      when: curl_version.rc == 0 and (curl_http_test is not defined or curl_http_test.status != 200)
+      
+    - name: Display command line test result
+      debug:
+        msg: "Command line test output: {{ curl_cli_test.stdout }}"
+      when: curl_version.rc == 0 and curl_cli_test.rc == 0
+      
+    - name: Test curl help command
+      command: curl --help
+      register: curl_help
+      failed_when: false
+      changed_when: false
+      when: curl_version.rc == 0
+      
+    - name: Check for libcurl development files
+      stat:
+        path: "{{ item }}"
+      register: libcurl_files
+      loop:
+        - /usr/include/curl/curl.h
+        - /usr/lib/x86_64-linux-gnu/libcurl.so
+        - /usr/lib64/libcurl.so
+        - /usr/lib/libcurl.so
+      when: curl_version.rc == 0
+      
+    - name: Display development files availability
+      debug:
+        msg: "Development file found: {{ item.item }}"
+      loop: "{{ libcurl_files.results }}"
+      when: curl_version.rc == 0 and item.stat.exists
+      
+    - name: Test SSL/TLS support
+      shell: curl --version | grep -i "ssl\\|tls"
+      register: curl_ssl_check
+      failed_when: false
+      changed_when: false
+      when: curl_version.rc == 0
+      
+    - name: Display SSL/TLS support
+      debug:
+        msg: "SSL/TLS support: {{ curl_ssl_check.stdout if curl_ssl_check.rc == 0 else 'Not detected or not available' }}"
+      when: curl_version.rc == 0
+      
+    - name: Check package manager for curl
+      debug:
+        msg: "Expected package name for {{ ansible_distribution }}: {{ curl_packages[ansible_distribution] | default('curl') }}"
+      
+    - name: Test package manager detection (Debian/Ubuntu)
+      command: dpkg -l curl
+      register: dpkg_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "Debian"
+      
+    - name: Display dpkg check result
+      debug:
+        msg: "Package manager shows curl is installed"
+      when: ansible_os_family == "Debian" and dpkg_check.rc == 0
+      
+    - name: Test package manager detection (RHEL/Fedora)
+      command: rpm -q curl
+      register: rpm_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "RedHat"
+      
+    - name: Display rpm check result
+      debug:
+        msg: "Package manager shows curl is installed: {{ rpm_check.stdout }}"
+      when: ansible_os_family == "RedHat" and rpm_check.rc == 0
+      
+    - name: Test package manager detection (Arch)
+      command: pacman -Q curl
+      register: pacman_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "Archlinux"
+      
+    - name: Display pacman check result
+      debug:
+        msg: "Package manager shows curl is installed: {{ pacman_check.stdout }}"
+      when: ansible_os_family == "Archlinux" and pacman_check.rc == 0
+      
+    - name: Count development files found
+      set_fact:
+        dev_files_count: "{{ libcurl_files.results | selectattr('stat.exists') | list | length }}"
+      when: curl_version.rc == 0
+      
+    - name: Summary of curl detection
+      debug:
+        msg:
+          - "=== CURL DETECTION SUMMARY ==="
+          - "Binary available: {{ 'Yes' if curl_which.rc == 0 else 'No' }}"
+          - "Version command works: {{ 'Yes' if curl_version.rc == 0 else 'No' }}"
+          - "HTTP functionality test: {{ 'Passed' if curl_http_test.status == 200 else 'Failed/Skipped' if curl_version.rc == 0 else 'Skipped' }}"
+          - "Help command works: {{ 'Yes' if curl_help.rc == 0 else 'No' if curl_version.rc == 0 else 'N/A' }}"
+          - "SSL/TLS support: {{ 'Yes' if curl_ssl_check.rc == 0 else 'Unknown' if curl_version.rc == 0 else 'N/A' }}"
+          - "Development files: {{ dev_files_count | default('0') }} found"
+          - "Package installed: {{ 'Yes' if (dpkg_check.rc == 0 and ansible_os_family == 'Debian') or (rpm_check.rc == 0 and ansible_os_family == 'RedHat') or (pacman_check.rc == 0 and ansible_os_family == 'Archlinux') else 'Unknown/No' }}"

@@ -1,0 +1,210 @@
+---
+# Bash Completion Detection Test Playbook
+# Tests bash-completion installation detection across distributions
+# Useful for debugging package management issues
+
+- name: Test Bash Completion Detection across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: no
+  
+  vars:
+    # Package name mappings for different distributions
+    bash_completion_packages:
+      Debian: bash-completion
+      Ubuntu: bash-completion
+      "Pop!_OS": bash-completion
+      "Linux Mint": bash-completion
+      elementary: bash-completion
+      RedHat: bash-completion
+      Fedora: bash-completion
+      CentOS: bash-completion
+      Rocky: bash-completion
+      AlmaLinux: bash-completion
+      Archlinux: bash-completion
+      Manjaro: bash-completion
+      openSUSE: bash-completion
+      SLES: bash-completion
+      Alpine: bash-completion
+
+  tasks:
+    - name: Display system information
+      debug:
+        msg: 
+          - "OS Distribution: {{ ansible_distribution }}"
+          - "OS Version: {{ ansible_distribution_version }}"
+          - "OS Family: {{ ansible_os_family }}"
+          - "Architecture: {{ ansible_architecture }}"
+          - "Kernel: {{ ansible_kernel }}"
+      
+    - name: Check for main bash-completion script
+      stat:
+        path: /usr/share/bash-completion/bash_completion
+      register: bash_completion_main
+      
+    - name: Display main script status
+      debug:
+        msg: "Main bash-completion script: {{ 'Found' if bash_completion_main.stat.exists else 'Not found' }}"
+      
+    - name: Check for completion directories
+      stat:
+        path: "{{ item }}"
+      register: completion_dirs
+      loop:
+        - /usr/share/bash-completion/completions
+        - /etc/bash_completion.d
+        - /usr/local/share/bash-completion/completions
+        - /usr/share/bash-completion/completions.d
+      
+    - name: Display completion directories
+      debug:
+        msg: "Completion directory found: {{ item.item }}"
+      loop: "{{ completion_dirs.results }}"
+      when: item.stat.exists
+      
+    - name: Count completion scripts in main directory
+      find:
+        paths: /usr/share/bash-completion/completions
+        file_type: file
+      register: completion_scripts
+      when: bash_completion_main.stat.exists
+      
+    - name: Display completion scripts count
+      debug:
+        msg: "Completion scripts available: {{ completion_scripts.files | length }}"
+      when: bash_completion_main.stat.exists and completion_scripts is defined
+      
+    - name: Test bash completion functionality
+      shell: |
+        # Source bash completion if available
+        if [ -f /usr/share/bash-completion/bash_completion ]; then
+          source /usr/share/bash-completion/bash_completion
+          # Test if completion function exists
+          if declare -F _completion_loader >/dev/null 2>&1; then
+            echo "functional"
+          else
+            echo "loaded_but_no_loader"
+          fi
+        else
+          echo "not_available"
+        fi
+      register: bash_completion_test
+      changed_when: false
+      
+    - name: Display functionality test result
+      debug:
+        msg: "Bash completion functionality: {{ bash_completion_test.stdout }}"
+      
+    - name: Check if bash-completion is loaded in current session
+      shell: |
+        if [[ -n "${BASH_COMPLETION_VERSINFO}" ]]; then
+          echo "loaded_version_${BASH_COMPLETION_VERSINFO[0]}.${BASH_COMPLETION_VERSINFO[1]}"
+        elif declare -F _completion_loader >/dev/null 2>&1; then
+          echo "loaded_no_version"
+        else
+          echo "not_loaded"
+        fi
+      register: current_session_check
+      changed_when: false
+      
+    - name: Display current session status
+      debug:
+        msg: "Current session status: {{ current_session_check.stdout }}"
+      
+    - name: Check bashrc integration
+      shell: |
+        if [ -f ~/.bashrc ]; then
+          if grep -q "bash.completion" ~/.bashrc 2>/dev/null; then
+            echo "integrated"
+          else
+            echo "not_integrated"
+          fi
+        else
+          echo "no_bashrc"
+        fi
+      register: bashrc_integration
+      changed_when: false
+      
+    - name: Display bashrc integration status
+      debug:
+        msg: "Bashrc integration: {{ bashrc_integration.stdout }}"
+      
+    - name: Test specific completion availability
+      shell: |
+        if [ -f /usr/share/bash-completion/bash_completion ]; then
+          source /usr/share/bash-completion/bash_completion
+          # Test a few common completions
+          completions=""
+          for cmd in git ssh scp rsync systemctl; do
+            if complete -p $cmd >/dev/null 2>&1; then
+              completions="$completions $cmd"
+            fi
+          done
+          echo "${completions# }"
+        else
+          echo "unavailable"
+        fi
+      register: specific_completions
+      changed_when: false
+      
+    - name: Display available command completions
+      debug:
+        msg: "Available completions for: {{ specific_completions.stdout if specific_completions.stdout != 'unavailable' and specific_completions.stdout != '' else 'None detected' }}"
+      
+    - name: Check package manager for bash-completion
+      debug:
+        msg: "Expected package name for {{ ansible_distribution }}: {{ bash_completion_packages[ansible_distribution] | default('bash-completion') }}"
+      
+    - name: Test package manager detection (Debian/Ubuntu)
+      command: dpkg -l bash-completion
+      register: dpkg_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "Debian"
+      
+    - name: Display dpkg check result
+      debug:
+        msg: "Package manager shows bash-completion is installed"
+      when: ansible_os_family == "Debian" and dpkg_check.rc == 0
+      
+    - name: Test package manager detection (RHEL/Fedora)
+      command: rpm -q bash-completion
+      register: rpm_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "RedHat"
+      
+    - name: Display rpm check result
+      debug:
+        msg: "Package manager shows bash-completion is installed: {{ rpm_check.stdout }}"
+      when: ansible_os_family == "RedHat" and rpm_check.rc == 0
+      
+    - name: Test package manager detection (Arch)
+      command: pacman -Q bash-completion
+      register: pacman_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "Archlinux"
+      
+    - name: Display pacman check result
+      debug:
+        msg: "Package manager shows bash-completion is installed: {{ pacman_check.stdout }}"
+      when: ansible_os_family == "Archlinux" and pacman_check.rc == 0
+      
+    - name: Count total directories and files found
+      set_fact:
+        dirs_found: "{{ completion_dirs.results | selectattr('stat.exists') | list | length }}"
+        scripts_found: "{{ completion_scripts.files | length if completion_scripts is defined else 0 }}"
+      
+    - name: Summary of bash-completion detection
+      debug:
+        msg:
+          - "=== BASH COMPLETION DETECTION SUMMARY ==="
+          - "Main script available: {{ 'Yes' if bash_completion_main.stat.exists else 'No' }}"
+          - "Completion directories: {{ dirs_found }} found"
+          - "Completion scripts: {{ scripts_found }}"
+          - "Functionality test: {{ bash_completion_test.stdout }}"
+          - "Current session: {{ current_session_check.stdout }}"
+          - "Bashrc integration: {{ bashrc_integration.stdout }}"
+          - "Package installed: {{ 'Yes' if (dpkg_check.rc == 0 and ansible_os_family == 'Debian') or (rpm_check.rc == 0 and ansible_os_family == 'RedHat') or (pacman_check.rc == 0 and ansible_os_family == 'Archlinux') else 'Unknown/No' }}"

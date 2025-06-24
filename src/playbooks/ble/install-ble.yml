@@ -1,0 +1,173 @@
+---
+# Ble.sh Installation Playbook
+# Source-based installation from GitHub repository using make
+# ble.sh is a bash line editor that provides advanced command-line editing
+# Repository: https://github.com/akinomyoga/ble.sh
+# Installation method: make install PREFIX=~/.local
+
+- name: Install ble.sh from source
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: no  # ble.sh is installed in user space
+  
+  vars:
+    # ble.sh repository and installation details
+    ble_repo_url: "https://github.com/akinomyoga/ble.sh.git"
+    ble_repo_name: "ble.sh"
+    
+    # Get SOURCE_INSTALL_LOCATION from pactopus config
+    # This will be passed from the pactopus script via extra-vars
+    source_install_location: "{{ ansible_env.HOME }}/source"
+    
+  tasks:
+    - name: Display installation information
+      debug:
+        msg:
+          - "Installing ble.sh (Bash Line Editor)"
+          - "Repository: {{ ble_repo_url }}"
+          - "Install location: {{ source_install_location }}/{{ ble_repo_name }}"
+          - "Target user: {{ ansible_env.USER }}"
+    
+    - name: Ensure source installation directory exists
+      file:
+        path: "{{ source_install_location }}"
+        state: directory
+        mode: '0755'
+    
+    - name: Check if ble.sh repository already exists
+      stat:
+        path: "{{ source_install_location }}/{{ ble_repo_name }}"
+      register: ble_repo_check
+    
+    - name: Clone ble.sh repository
+      git:
+        repo: "{{ ble_repo_url }}"
+        dest: "{{ source_install_location }}/{{ ble_repo_name }}"
+        version: master
+        force: no
+      when: not ble_repo_check.stat.exists
+      register: ble_clone_result
+    
+    - name: Update ble.sh repository if it already exists
+      git:
+        repo: "{{ ble_repo_url }}"
+        dest: "{{ source_install_location }}/{{ ble_repo_name }}"
+        version: master
+        force: no
+      when: ble_repo_check.stat.exists
+      register: ble_update_result
+    
+    - name: Display repository status
+      debug:
+        msg: "{{ 'Repository cloned successfully' if ble_clone_result.changed else 'Repository updated' if ble_update_result.changed else 'Repository is already up to date' }}"
+    
+    - name: Check if ble.sh is already installed
+      stat:
+        path: "{{ ansible_env.HOME }}/.local/share/blesh"
+      register: ble_install_check
+    
+    - name: Display current installation status
+      debug:
+        msg: "ble.sh is {{ 'already installed' if ble_install_check.stat.exists else 'not installed' }}"
+    
+    - name: Check if make is available
+      command: which make
+      register: make_check
+      failed_when: false
+      changed_when: false
+    
+    - name: Display make availability
+      debug:
+        msg: "Make command: {{ 'Available' if make_check.rc == 0 else 'Not available - required for ble.sh installation' }}"
+    
+    - name: Install ble.sh using make
+      shell: |
+        cd "{{ source_install_location }}/{{ ble_repo_name }}"
+        make install PREFIX="{{ ansible_env.HOME }}/.local"
+      register: ble_install_result
+      when: (not ble_install_check.stat.exists or ble_clone_result.changed or ble_update_result.changed) and make_check.rc == 0
+    
+    - name: Display make installation failure if make is missing
+      debug:
+        msg: 
+          - "ERROR: make command not found"
+          - "ble.sh requires make for installation"
+          - "Please install make first: pactopus install make"
+      when: make_check.rc != 0
+      
+    - name: Display installation result
+      debug:
+        msg: "{{ ble_install_result.stdout }}"
+      when: ble_install_result is defined and ble_install_result.stdout is defined
+    
+    - name: Check for ble.sh installation
+      stat:
+        path: "{{ ansible_env.HOME }}/.local/share/blesh/ble.sh"
+      register: ble_final_check
+    
+    - name: Verify ble.sh installation
+      debug:
+        msg: "ble.sh installation {{ 'completed successfully' if ble_final_check.stat.exists else 'may have failed' }}"
+    
+    - name: Check if ble.sh is already enabled in bashrc
+      shell: grep -q "ble.sh" "{{ ansible_env.HOME }}/.bashrc" 2>/dev/null || echo "not_found"
+      register: bashrc_check
+      changed_when: false
+    
+    - name: Display bashrc integration status
+      debug:
+        msg: "ble.sh in .bashrc: {{ 'Already configured' if bashrc_check.stdout != 'not_found' else 'Not configured' }}"
+    
+    - name: Add ble.sh to .bashrc if not already present
+      blockinfile:
+        path: "{{ ansible_env.HOME }}/.bashrc"
+        marker: "# {mark} ble.sh configuration (added by pactopus)"
+        block: |
+          # Load ble.sh for enhanced bash line editing
+          [[ $- == *i* ]] && source ~/.local/share/blesh/ble.sh --noattach
+        create: yes
+        backup: yes
+      when: bashrc_check.stdout == "not_found" and ble_final_check.stat.exists
+      register: bashrc_update
+    
+    - name: Add ble.sh attach command to end of .bashrc
+      lineinfile:
+        path: "{{ ansible_env.HOME }}/.bashrc"
+        line: "[[ ${BLE_VERSION-} ]] && ble-attach"
+        insertafter: EOF
+        create: yes
+        backup: yes
+      when: bashrc_check.stdout == "not_found" and ble_final_check.stat.exists and bashrc_update.changed
+    
+    - name: Display setup completion message
+      debug:
+        msg:
+          - "ble.sh installation complete!"
+          - "Installation method: make install PREFIX=~/.local"
+          - "Location: {{ ansible_env.HOME }}/.local/share/blesh/ble.sh"
+          - "Source code: {{ source_install_location }}/{{ ble_repo_name }}"
+          - "Configuration: {{ 'Added to ~/.bashrc' if bashrc_update.changed else 'Already in ~/.bashrc' }}"
+          - ""
+          - "To start using ble.sh:"
+          - "1. Restart your terminal or run: source ~/.bashrc"
+          - "2. ble.sh will provide enhanced command-line editing features"
+          - ""
+          - "Features include:"
+          - "- Syntax highlighting"
+          - "- Auto-suggestions" 
+          - "- Enhanced completion"
+          - "- Better history search"
+      when: ble_final_check.stat.exists
+    
+    - name: Display installation failure message
+      debug:
+        msg:
+          - "ble.sh installation may have failed"
+          - "Check the installation log above for errors"
+          - "Common issues:"
+          - "  - Missing make command (install with: pactopus install make)"
+          - "  - Missing git command (install with: pactopus install git)"
+          - "You can try manual installation from: {{ source_install_location }}/{{ ble_repo_name }}"
+          - "Manual command: cd {{ source_install_location }}/{{ ble_repo_name }} && make install PREFIX=~/.local"
+      when: not ble_final_check.stat.exists

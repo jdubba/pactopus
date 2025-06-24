@@ -1,0 +1,125 @@
+---
+# Curl Removal Playbook
+# Cross-distribution curl removal with package name mapping
+# Supports: Debian/Ubuntu, RHEL/Fedora/CentOS, Arch, SUSE, Alpine
+
+- name: Remove Curl across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Package name mappings for different distributions
+    curl_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.)
+      Debian: curl
+      Ubuntu: curl
+      "Pop!_OS": curl
+      "Linux Mint": curl
+      elementary: curl
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: curl
+      Fedora: curl
+      CentOS: curl
+      Rocky: curl
+      AlmaLinux: curl
+      # Arch family
+      Archlinux: curl
+      Manjaro: curl
+      # SUSE family
+      openSUSE: curl
+      SLES: curl
+      # Alpine
+      Alpine: curl
+
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+      
+    - name: Check if curl is currently installed
+      command: curl --version
+      register: curl_version_check
+      failed_when: false
+      changed_when: false
+      
+    - name: Display current curl version if installed
+      debug:
+        msg: "Curl is currently installed: {{ curl_version_check.stdout | regex_replace('\\n.*', '') }}"
+      when: curl_version_check.rc == 0
+      
+    - name: Skip removal if curl is not installed
+      debug:
+        msg: "Curl is not installed, nothing to remove"
+      when: curl_version_check.rc != 0
+      
+    - name: Warning about curl dependencies
+      debug:
+        msg: 
+          - "WARNING: Removing curl may break other applications that depend on it"
+          - "Many system tools and applications rely on curl for network operations"
+          - "Consider carefully before proceeding with removal"
+      when: curl_version_check.rc == 0
+      
+    - name: Remove curl (Debian/Ubuntu)
+      apt:
+        name: "{{ curl_packages[ansible_distribution] | default('curl') }}"
+        state: absent
+      when: ansible_os_family == "Debian" and curl_version_check.rc == 0
+      
+    - name: Remove curl (RHEL/Fedora/CentOS)
+      dnf:
+        name: "{{ curl_packages[ansible_distribution] | default('curl') }}"
+        state: absent
+      when: ansible_os_family == "RedHat" and curl_version_check.rc == 0
+      ignore_errors: yes
+      
+    - name: Remove curl (RHEL/CentOS with yum fallback)
+      yum:
+        name: "{{ curl_packages[ansible_distribution] | default('curl') }}"
+        state: absent
+      when: ansible_os_family == "RedHat" and curl_version_check.rc == 0 and ansible_distribution_major_version|int < 8
+      ignore_errors: yes
+      
+    - name: Remove curl (Arch Linux)
+      pacman:
+        name: "{{ curl_packages[ansible_distribution] | default('curl') }}"
+        state: absent
+      when: ansible_os_family == "Archlinux" and curl_version_check.rc == 0
+      
+    - name: Remove curl (SUSE)
+      zypper:
+        name: "{{ curl_packages[ansible_distribution] | default('curl') }}"
+        state: absent
+      when: ansible_os_family == "Suse" and curl_version_check.rc == 0
+      
+    - name: Remove curl (Alpine)
+      apk:
+        name: "{{ curl_packages[ansible_distribution] | default('curl') }}"
+        state: absent
+      when: ansible_os_family == "Alpine" and curl_version_check.rc == 0
+      
+    - name: Verify curl removal
+      command: curl --version
+      register: curl_removal_check
+      failed_when: false
+      changed_when: false
+      
+    - name: Display removal success
+      debug:
+        msg: "Curl has been successfully removed"
+      when: curl_removal_check.rc != 0
+      
+    - name: Display removal warning if still present
+      debug:
+        msg: "Warning: Curl may still be present on the system"
+      when: curl_removal_check.rc == 0
+      
+    - name: Display post-removal note
+      debug:
+        msg: 
+          - "Note: If you experience issues with other applications after removing curl,"
+          - "you may need to reinstall it as many tools depend on curl for network operations"
+          - "Consider using 'pactopus install curl' to reinstall if needed"
+      when: curl_removal_check.rc != 0

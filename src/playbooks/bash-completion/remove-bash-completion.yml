@@ -1,0 +1,124 @@
+---
+# Bash Completion Removal Playbook
+# Cross-distribution bash-completion removal with package name mapping
+# Supports: Debian/Ubuntu, RHEL/Fedora/CentOS, Arch, SUSE, Alpine
+
+- name: Remove Bash Completion across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Package name mappings for different distributions
+    bash_completion_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.)
+      Debian: bash-completion
+      Ubuntu: bash-completion
+      "Pop!_OS": bash-completion
+      "Linux Mint": bash-completion
+      elementary: bash-completion
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: bash-completion
+      Fedora: bash-completion
+      CentOS: bash-completion
+      Rocky: bash-completion
+      AlmaLinux: bash-completion
+      # Arch family
+      Archlinux: bash-completion
+      Manjaro: bash-completion
+      # SUSE family
+      openSUSE: bash-completion
+      SLES: bash-completion
+      # Alpine
+      Alpine: bash-completion
+
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+      
+    - name: Check if bash-completion is currently installed
+      stat:
+        path: /usr/share/bash-completion/bash_completion
+      register: bash_completion_check
+      
+    - name: Display current bash-completion status
+      debug:
+        msg: "Bash completion is {{ 'currently installed' if bash_completion_check.stat.exists else 'not found' }}"
+      
+    - name: Skip removal if bash-completion is not installed
+      debug:
+        msg: "Bash completion is not installed, nothing to remove"
+      when: not bash_completion_check.stat.exists
+      
+    - name: Warning about bash-completion removal
+      debug:
+        msg: 
+          - "WARNING: Removing bash-completion will disable tab completion for many commands"
+          - "This may significantly impact your command-line experience"
+          - "Many system tools and applications rely on bash completion"
+      when: bash_completion_check.stat.exists
+      
+    - name: Remove bash-completion (Debian/Ubuntu)
+      apt:
+        name: "{{ bash_completion_packages[ansible_distribution] | default('bash-completion') }}"
+        state: absent
+      when: ansible_os_family == "Debian" and bash_completion_check.stat.exists
+      
+    - name: Remove bash-completion (RHEL/Fedora/CentOS)
+      dnf:
+        name: "{{ bash_completion_packages[ansible_distribution] | default('bash-completion') }}"
+        state: absent
+      when: ansible_os_family == "RedHat" and bash_completion_check.stat.exists
+      ignore_errors: yes
+      
+    - name: Remove bash-completion (RHEL/CentOS with yum fallback)
+      yum:
+        name: "{{ bash_completion_packages[ansible_distribution] | default('bash-completion') }}"
+        state: absent
+      when: ansible_os_family == "RedHat" and bash_completion_check.stat.exists and ansible_distribution_major_version|int < 8
+      ignore_errors: yes
+      
+    - name: Remove bash-completion (Arch Linux)
+      pacman:
+        name: "{{ bash_completion_packages[ansible_distribution] | default('bash-completion') }}"
+        state: absent
+      when: ansible_os_family == "Archlinux" and bash_completion_check.stat.exists
+      
+    - name: Remove bash-completion (SUSE)
+      zypper:
+        name: "{{ bash_completion_packages[ansible_distribution] | default('bash-completion') }}"
+        state: absent
+      when: ansible_os_family == "Suse" and bash_completion_check.stat.exists
+      
+    - name: Remove bash-completion (Alpine)
+      apk:
+        name: "{{ bash_completion_packages[ansible_distribution] | default('bash-completion') }}"
+        state: absent
+      when: ansible_os_family == "Alpine" and bash_completion_check.stat.exists
+      
+    - name: Verify bash-completion removal
+      stat:
+        path: /usr/share/bash-completion/bash_completion
+      register: bash_completion_removal_check
+      
+    - name: Display removal success
+      debug:
+        msg: "Bash completion has been successfully removed"
+      when: not bash_completion_removal_check.stat.exists
+      
+    - name: Display removal warning if still present
+      debug:
+        msg: "Warning: Bash completion may still be present on the system"
+      when: bash_completion_removal_check.stat.exists
+      
+    - name: Display post-removal note
+      debug:
+        msg: 
+          - "Note: After removing bash-completion, you may need to:"
+          - "1. Restart your terminal or run 'source ~/.bashrc'"
+          - "2. Remove any bash-completion references from ~/.bashrc if desired"
+          - "3. Consider reinstalling if tab completion stops working properly"
+          - "Command to reinstall: pactopus install bash-completion"
+      when: not bash_completion_removal_check.stat.exists

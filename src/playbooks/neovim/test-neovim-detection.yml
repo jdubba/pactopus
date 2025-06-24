@@ -1,0 +1,231 @@
+---
+# Neovim Detection Test Playbook
+# Tests neovim installation detection and functionality
+# Useful for debugging cross-distribution installation issues
+
+- name: Test Neovim Detection and Functionality
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: no
+  
+  vars:
+    # Rolling release distributions (use native packages)
+    rolling_distributions:
+      - Archlinux
+      - Manjaro
+      - Fedora
+      - openSUSE Tumbleweed
+    
+    # Stable distributions (use binary releases)
+    stable_distributions:
+      - Debian
+      - Ubuntu
+      - "Pop!_OS"
+      - "Linux Mint"
+      - elementary
+      - RedHat
+      - CentOS
+      - Rocky
+      - AlmaLinux
+      - "Amazon Linux"
+      - Alpine
+      - SLES
+      - "openSUSE Leap"
+    
+    # Neovim binary release information
+    neovim_install_dir: "/opt/neovim"
+    neovim_binary_link: "/usr/local/bin/nvim"
+    
+  tasks:
+    - name: Display system information
+      debug:
+        msg: 
+          - "OS Distribution: {{ ansible_distribution }}"
+          - "OS Version: {{ ansible_distribution_version }}"
+          - "OS Family: {{ ansible_os_family }}"
+          - "Architecture: {{ ansible_architecture }}"
+          - "Package Manager: {{ ansible_pkg_mgr }}"
+    
+    - name: Determine if distribution is rolling or stable
+      set_fact:
+        is_rolling_distribution: "{{ ansible_distribution in rolling_distributions }}"
+        is_stable_distribution: "{{ ansible_distribution in stable_distributions }}"
+
+    - name: Display distribution classification
+      debug:
+        msg: 
+          - "Distribution type: {{ 'Rolling' if is_rolling_distribution else 'Stable' if is_stable_distribution else 'Unknown' }}"
+          - "Expected installation method: {{ 'Package manager' if is_rolling_distribution else 'GitHub binary to /opt' if is_stable_distribution else 'Unknown' }}"
+    
+    - name: Check if neovim is installed via command
+      command: nvim --version
+      register: neovim_version_check
+      failed_when: false
+      changed_when: false
+    
+    - name: Display neovim version status
+      debug:
+        msg: "Neovim command: {{ 'Available' if neovim_version_check.rc == 0 else 'Not available' }}"
+    
+    - name: Show neovim version details
+      debug:
+        msg: "Neovim version: {{ neovim_version_check.stdout | regex_replace('\\n.*', '') }}"
+      when: neovim_version_check.rc == 0
+    
+    - name: Check neovim binary location
+      shell: which nvim
+      register: neovim_location
+      failed_when: false
+      changed_when: false
+    
+    - name: Display neovim binary location
+      debug:
+        msg: "Neovim binary location: {{ neovim_location.stdout if neovim_location.rc == 0 else 'Not found' }}"
+    
+    - name: Check if binary installation exists (/opt method)
+      stat:
+        path: "{{ neovim_install_dir }}/bin/nvim"
+      register: neovim_binary_check
+    
+    - name: Display binary installation status
+      debug:
+        msg: "Binary installation (/opt): {{ 'Found' if neovim_binary_check.stat.exists else 'Not found' }}"
+    
+    - name: Check symbolic link status
+      stat:
+        path: "{{ neovim_binary_link }}"
+      register: neovim_link_check
+    
+    - name: Display symbolic link status
+      debug:
+        msg: "Symbolic link (/usr/local/bin/nvim): {{ 'Exists' if neovim_link_check.stat.exists else 'Missing' }}"
+      when: is_stable_distribution
+    
+    - name: Get binary installation version (if exists)
+      shell: "{{ neovim_install_dir }}/bin/nvim --version | head -1"
+      register: neovim_binary_version
+      failed_when: false
+      changed_when: false
+      when: neovim_binary_check.stat.exists
+    
+    - name: Display binary installation version
+      debug:
+        msg: "Binary installation version: {{ neovim_binary_version.stdout }}"
+      when: neovim_binary_check.stat.exists and neovim_binary_version.rc == 0
+    
+    - name: Check package manager installation (rolling distributions)
+      shell: |
+        case "{{ ansible_pkg_mgr }}" in
+          pacman)
+            pacman -Qi neovim 2>/dev/null || echo "not_installed"
+            ;;
+          dnf|yum)
+            dnf list installed neovim 2>/dev/null || echo "not_installed"
+            ;;
+          zypper)
+            zypper search -i neovim 2>/dev/null || echo "not_installed"
+            ;;
+          *)
+            echo "unsupported_package_manager"
+            ;;
+        esac
+      register: package_check
+      failed_when: false
+      changed_when: false
+      when: is_rolling_distribution
+    
+    - name: Display package manager installation status
+      debug:
+        msg: "Package manager installation: {{ 'Installed' if package_check.stdout != 'not_installed' and 'not_installed' not in package_check.stdout else 'Not installed' }}"
+      when: is_rolling_distribution and package_check is defined
+    
+    - name: Test neovim functionality
+      shell: |
+        timeout 5 nvim --version >/dev/null 2>&1 && echo "functional" || echo "not_functional"
+      register: neovim_function_test
+      failed_when: false
+      changed_when: false
+      when: neovim_version_check.rc == 0
+    
+    - name: Display functionality test result
+      debug:
+        msg: "Neovim functionality test: {{ neovim_function_test.stdout if neovim_function_test is defined else 'Skipped (not installed)' }}"
+    
+    - name: Check neovim configuration directory
+      stat:
+        path: "{{ ansible_env.HOME }}/.config/nvim"
+      register: neovim_config_check
+    
+    - name: Display configuration status
+      debug:
+        msg: "Neovim config directory: {{ 'Exists' if neovim_config_check.stat.exists else 'Not found' }} at ~/.config/nvim"
+    
+    - name: List configuration files (if config exists)
+      find:
+        paths: "{{ ansible_env.HOME }}/.config/nvim"
+        patterns: "*.vim,*.lua,*.json"
+        recurse: yes
+      register: neovim_config_files
+      when: neovim_config_check.stat.exists
+    
+    - name: Display configuration files
+      debug:
+        msg: "Configuration files found: {{ neovim_config_files.files | length }}"
+      when: neovim_config_check.stat.exists and neovim_config_files is defined
+    
+    - name: Check PATH for neovim binary
+      shell: echo $PATH | tr ':' '\n' | grep -E '(local|opt)'
+      register: path_check
+      failed_when: false
+      changed_when: false
+    
+    - name: Display relevant PATH entries
+      debug:
+        msg: "Relevant PATH entries: {{ path_check.stdout_lines }}"
+      when: path_check.rc == 0
+    
+    - name: Test GitHub API connectivity (for stable distributions)
+      uri:
+        url: "https://api.github.com/repos/neovim/neovim/releases/latest"
+        method: GET
+        return_content: no
+        timeout: 10
+      register: github_api_test
+      failed_when: false
+      when: is_stable_distribution
+    
+    - name: Display GitHub API connectivity
+      debug:
+        msg: "GitHub API connectivity: {{ 'Available' if github_api_test.status == 200 else 'Failed' if github_api_test is defined else 'Skipped' }}"
+      when: is_stable_distribution
+    
+    - name: Check required dependencies
+      shell: which {{ item }}
+      register: deps_check
+      failed_when: false
+      changed_when: false
+      loop:
+        - curl
+        - wget
+        - tar
+        - gzip
+    
+    - name: Display dependency status
+      debug:
+        msg: "{{ item.item }}: {{ 'Available' if item.rc == 0 else 'Missing' }}"
+      loop: "{{ deps_check.results }}"
+      when: deps_check is defined
+    
+    - name: Summary of neovim detection
+      debug:
+        msg:
+          - "=== NEOVIM DETECTION SUMMARY ==="
+          - "Distribution: {{ ansible_distribution }} ({{ 'Rolling' if is_rolling_distribution else 'Stable' }})"
+          - "Neovim installed: {{ 'Yes' if neovim_version_check.rc == 0 else 'No' }}"
+          - "Installation method: {{ 'Package manager' if is_rolling_distribution and package_check.stdout != 'not_installed' else 'Binary (/opt)' if neovim_binary_check.stat.exists else 'Unknown/None' }}"
+          - "Version: {{ neovim_version_check.stdout | regex_replace('\\n.*', '') if neovim_version_check.rc == 0 else 'N/A' }}"
+          - "Binary location: {{ neovim_location.stdout if neovim_location.rc == 0 else 'N/A' }}"
+          - "Functionality: {{ neovim_function_test.stdout if neovim_function_test is defined else 'N/A' }}"
+          - "Configuration: {{ 'Present' if neovim_config_check.stat.exists else 'None' }}"
+          - "GitHub API: {{ 'Available' if github_api_test.status == 200 else 'Failed' if github_api_test is defined else 'N/A' }}"

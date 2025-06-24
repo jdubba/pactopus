@@ -1,0 +1,182 @@
+---
+# Which Installation Playbook
+# Cross-distribution which package installation
+# which locates commands by searching PATH
+
+- name: Install which across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: no
+  
+  vars:
+    # Package name mappings for different distributions
+    # Note: On Debian/Ubuntu, 'which' is provided by debianutils (essential package)
+    which_packages:
+      # Debian family - which is provided by debianutils, not a separate package
+      Debian: debianutils
+      Ubuntu: debianutils
+      "Pop!_OS": debianutils
+      "Linux Mint": debianutils
+      elementary: debianutils
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: which
+      Fedora: which
+      CentOS: which
+      Rocky: which
+      AlmaLinux: which
+      # Arch family (which is often built-in or part of base)
+      Archlinux: which
+      Manjaro: which
+      # SUSE family
+      openSUSE: which
+      SLES: which
+      # Alpine
+      Alpine: which
+    
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Show package name for this distribution
+      debug:
+        msg: "Which package name for {{ ansible_distribution }}: {{ which_packages[ansible_distribution] | default('which') }}"
+
+    - name: Check if which is already installed
+      command: which which
+      register: which_version_check
+      failed_when: false
+      changed_when: false
+
+    - name: Check which provider on Debian/Ubuntu systems
+      shell: |
+        # Follow symlinks to find the actual binary, then check its package
+        which_path=$(which which 2>/dev/null)
+        if [ -n "$which_path" ]; then
+          # Resolve all symlinks to get the real file
+          real_path=$(readlink -f "$which_path" 2>/dev/null)
+          if [ -n "$real_path" ]; then
+            dpkg -S "$real_path" 2>/dev/null | cut -d: -f1 || echo "unknown"
+          else
+            echo "unknown"
+          fi
+        else
+          echo "unknown"
+        fi
+      register: which_provider_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "Debian" and which_version_check.rc == 0
+
+    - name: Display current which status if installed
+      debug:
+        msg: "Which is already available: {{ which_version_check.stdout if which_version_check.rc == 0 else 'Command not found' }}{{ ' (provided by ' + which_provider_check.stdout + ')' if which_provider_check is defined and which_provider_check.stdout != 'unknown' else '' }}"
+      when: which_version_check.rc == 0
+
+    - name: Check which version if available
+      command: which --version
+      register: which_detailed_version
+      failed_when: false
+      changed_when: false
+      when: which_version_check.rc == 0
+
+    - name: Display which version details
+      debug:
+        msg: "Which version: {{ which_detailed_version.stdout | regex_replace('\\n.*', '') }}"
+      when: which_detailed_version is defined and which_detailed_version.rc == 0
+
+    - name: Show what would be installed
+      debug:
+        msg: "{{ 'Which is already available' if which_version_check.rc == 0 else 'Will install which package' }}{{ ' (via system package)' if ansible_os_family == 'Debian' and which_provider_check is defined and which_provider_check.stdout == 'debianutils' else '' }}"
+
+    - name: Show installation command that would be used
+      debug:
+        msg: "Installation method: {{ ansible_pkg_mgr }}"
+
+    - name: Ensure package cache is updated
+      package:
+        update_cache: yes
+      become: yes
+      when: which_version_check.rc != 0
+
+    - name: Skip installation on Debian/Ubuntu if already provided by system
+      debug:
+        msg: 
+          - "Which is already available via system package ({{ which_provider_check.stdout }})"
+          - "No additional installation needed"
+      when: ansible_os_family == "Debian" and which_version_check.rc == 0 and which_provider_check is defined and which_provider_check.stdout == "debianutils"
+
+    - name: Install/upgrade which (Debian/Ubuntu)
+      apt:
+        name: "{{ which_packages[ansible_distribution] | default('which') }}"
+        state: latest
+        update_cache: yes
+      when: ansible_os_family == "Debian" and (which_version_check.rc != 0 or (which_provider_check is defined and which_provider_check.stdout != "debianutils"))
+      become: yes
+
+    - name: Install/upgrade which (RedHat/Fedora)
+      dnf:
+        name: "{{ which_packages[ansible_distribution] | default('which') }}"
+        state: latest
+      when: ansible_os_family == "RedHat"
+      become: yes
+
+    - name: Install/upgrade which (Arch Linux)
+      pacman:
+        name: "{{ which_packages[ansible_distribution] | default('which') }}"
+        state: latest
+      when: ansible_os_family == "Archlinux"
+      become: yes
+
+    - name: Install/upgrade which (SUSE)
+      zypper:
+        name: "{{ which_packages[ansible_distribution] | default('which') }}"
+        state: latest
+      when: ansible_os_family == "Suse"
+      become: yes
+
+    - name: Install/upgrade which (Alpine)
+      apk:
+        name: "{{ which_packages[ansible_distribution] | default('which') }}"
+        state: latest
+      when: ansible_os_family == "Alpine"
+      become: yes
+
+    - name: Verify which installation
+      command: which which
+      register: which_final_check
+      changed_when: false
+
+    - name: Display final which location
+      debug:
+        msg: "Which is available at: {{ which_final_check.stdout }}"
+
+    - name: Test which functionality
+      command: which ls
+      register: which_functionality_test
+      changed_when: false
+
+    - name: Display which usage hints
+      debug:
+        msg:
+          - "Which installation complete!"
+          - "Usage: which [command]             # Find location of command"
+          - "       which -a [command]          # Show all locations of command"
+          - "       which --help                # Show help options"
+          - ""
+          - "Examples:"
+          - "  which ls                         # Find location of 'ls' command"
+          - "  which -a python                  # Find all 'python' locations"
+          - "  which bash git curl              # Find multiple commands"
+          - ""
+          - "Functionality test:"
+          - "  which ls = {{ which_functionality_test.stdout }}"
+          - ""
+          - "Note: 'which' helps locate executables in your PATH"
+          - "Alternative: 'type' (bash built-in), 'whereis', 'locate'"
+
+  handlers:
+    - name: refresh package cache
+      package:
+        update_cache: yes

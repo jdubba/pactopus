@@ -1,0 +1,276 @@
+---
+# Fastfetch Installation Playbook
+# Cross-distribution fastfetch installation with package name mapping
+# Supports: Debian/Ubuntu, RHEL/Fedora/CentOS, Arch, SUSE, Alpine
+
+- name: Install Fastfetch across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Package name mappings for different distributions
+    fastfetch_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.)
+      Debian: fastfetch
+      Ubuntu: fastfetch
+      "Pop!_OS": fastfetch
+      "Linux Mint": fastfetch
+      elementary: fastfetch
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: fastfetch
+      Fedora: fastfetch
+      CentOS: fastfetch
+      Rocky: fastfetch
+      AlmaLinux: fastfetch
+      # Arch family
+      Archlinux: fastfetch
+      Manjaro: fastfetch
+      # SUSE family
+      openSUSE: fastfetch
+      SLES: fastfetch
+      # Alpine
+      Alpine: fastfetch
+    
+    # Rolling release distributions (prefer native packages)
+    rolling_distributions:
+      - Archlinux
+      - Manjaro
+      - Fedora
+      - openSUSE Tumbleweed
+    
+    # Stable distributions (prefer newer sources)
+    stable_distributions:
+      - Debian
+      - Ubuntu
+      - "Pop!_OS"
+      - "Linux Mint"
+      - elementary
+      - RedHat
+      - CentOS
+      - Rocky
+      - AlmaLinux
+      - "Amazon Linux"
+      - Alpine
+      - SLES
+      - "openSUSE Leap"
+    
+    # Ubuntu-based distributions that should use Ubuntu repositories
+    ubuntu_derivatives:
+      - Ubuntu
+      - "Pop!_OS"
+      - "Linux Mint"
+      - elementary
+
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Determine if distribution is rolling or stable
+      set_fact:
+        is_rolling_distribution: "{{ ansible_distribution in rolling_distributions }}"
+        is_stable_distribution: "{{ ansible_distribution in stable_distributions }}"
+
+    - name: Display distribution type
+      debug:
+        msg: "Distribution type: {{ 'Rolling' if is_rolling_distribution else 'Stable' }}"
+
+    # Add universe repository for Ubuntu derivatives (fastfetch may be in universe)
+    - name: Enable universe repository (Ubuntu derivatives)
+      apt_repository:
+        repo: "{{ item }}"
+        state: present
+      loop:
+        - "deb http://archive.ubuntu.com/ubuntu {{ ansible_distribution_release }} universe"
+        - "deb http://archive.ubuntu.com/ubuntu {{ ansible_distribution_release }}-updates universe"
+      when: ansible_os_family == "Debian" and ansible_distribution in ubuntu_derivatives and is_stable_distribution
+      ignore_errors: yes
+
+    # Enable backports repository for Debian stable releases
+    - name: Enable backports repository (Debian)
+      apt_repository:
+        repo: "deb http://deb.debian.org/debian {{ ansible_distribution_release }}-backports main"
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian" and ansible_distribution == "Debian" and is_stable_distribution
+      ignore_errors: yes
+
+    # Enable EPEL for RHEL family stable distributions
+    - name: Enable EPEL repository (RHEL family)
+      dnf:
+        name: epel-release
+        state: present
+      when: ansible_os_family == "RedHat" and is_stable_distribution and ansible_distribution != "Fedora"
+      ignore_errors: yes
+
+    # Enable additional repositories for RHEL family that might have fastfetch
+    - name: Enable RPM Fusion Free (Fedora)
+      dnf:
+        name: "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-{{ ansible_distribution_major_version }}.noarch.rpm"
+        state: present
+        disable_gpg_check: yes
+      when: ansible_os_family == "RedHat" and ansible_distribution == "Fedora"
+      ignore_errors: yes
+
+    - name: Ensure package cache is updated (Debian/Ubuntu)
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+      
+    - name: Ensure package cache is updated (RHEL/Fedora)
+      dnf:
+        update_cache: yes
+      when: ansible_os_family == "RedHat"
+      ignore_errors: yes
+      
+    - name: Ensure package cache is updated (RHEL/CentOS with yum)
+      yum:
+        update_cache: yes
+      when: ansible_os_family == "RedHat" and ansible_distribution_major_version|int < 8
+      ignore_errors: yes
+      
+    - name: Ensure package cache is updated (Arch)
+      pacman:
+        update_cache: yes
+      when: ansible_os_family == "Archlinux"
+      
+    - name: Ensure package cache is updated (SUSE)
+      zypper:
+        update_cache: yes
+      when: ansible_os_family == "Suse"
+      
+    - name: Ensure package cache is updated (Alpine)
+      apk:
+        update_cache: yes
+      when: ansible_os_family == "Alpine"
+      
+    - name: Check if fastfetch is already installed
+      command: fastfetch --version
+      register: fastfetch_version_check
+      failed_when: false
+      changed_when: false
+      
+    - name: Display current fastfetch version if installed
+      debug:
+        msg: "Fastfetch is already installed: {{ fastfetch_version_check.stdout | regex_replace('\\n.*', '') }}"
+      when: fastfetch_version_check.rc == 0
+      
+    - name: Install/upgrade fastfetch from backports (Debian stable)
+      apt:
+        name: "{{ fastfetch_packages[ansible_distribution] | default('fastfetch') }}"
+        state: latest
+        default_release: "{{ ansible_distribution_release }}-backports"
+      when: ansible_os_family == "Debian" and ansible_distribution == "Debian" and is_stable_distribution
+      ignore_errors: yes
+      
+    - name: Install/upgrade fastfetch (Ubuntu and derivatives stable) 
+      apt:
+        name: "{{ fastfetch_packages[ansible_distribution] | default('fastfetch') }}"
+        state: latest
+      when: ansible_os_family == "Debian" and ansible_distribution in ubuntu_derivatives and is_stable_distribution
+      ignore_errors: yes
+      
+    - name: Install/upgrade fastfetch (Debian/Ubuntu rolling or fallback)
+      apt:
+        name: "{{ fastfetch_packages[ansible_distribution] | default('fastfetch') }}"
+        state: latest
+      when: ansible_os_family == "Debian" and (is_rolling_distribution or ansible_failed_result is defined)
+      ignore_errors: yes
+      
+    - name: Install/upgrade fastfetch (RHEL/Fedora/CentOS stable with EPEL)
+      dnf:
+        name: "{{ fastfetch_packages[ansible_distribution] | default('fastfetch') }}"
+        state: latest
+        enablerepo: epel
+      when: ansible_os_family == "RedHat" and is_stable_distribution and ansible_distribution != "Fedora"
+      ignore_errors: yes
+      
+    - name: Install/upgrade fastfetch (Fedora rolling)
+      dnf:
+        name: "{{ fastfetch_packages[ansible_distribution] | default('fastfetch') }}"
+        state: latest
+      when: ansible_os_family == "RedHat" and ansible_distribution == "Fedora"
+      ignore_errors: yes
+      
+    - name: Install/upgrade fastfetch (RHEL/CentOS with yum fallback)
+      yum:
+        name: "{{ fastfetch_packages[ansible_distribution] | default('fastfetch') }}"
+        state: latest
+        enablerepo: epel
+      when: ansible_os_family == "RedHat" and is_stable_distribution and ansible_distribution_major_version|int < 8
+      ignore_errors: yes
+      
+    - name: Install/upgrade fastfetch (Arch Linux)
+      pacman:
+        name: "{{ fastfetch_packages[ansible_distribution] | default('fastfetch') }}"
+        state: latest
+      when: ansible_os_family == "Archlinux"
+      
+    - name: Install/upgrade fastfetch (SUSE)
+      zypper:
+        name: "{{ fastfetch_packages[ansible_distribution] | default('fastfetch') }}"
+        state: latest
+      when: ansible_os_family == "Suse"
+      ignore_errors: yes
+      
+    - name: Install/upgrade fastfetch (Alpine)
+      apk:
+        name: "{{ fastfetch_packages[ansible_distribution] | default('fastfetch') }}"
+        state: latest
+      when: ansible_os_family == "Alpine"
+      ignore_errors: yes
+
+    # Fallback: Try to install from GitHub releases if package not available
+    - name: Check if fastfetch installation succeeded
+      command: fastfetch --version
+      register: fastfetch_verify
+      failed_when: false
+      changed_when: false
+
+    - name: Display package installation note
+      debug:
+        msg: 
+          - "Note: Fastfetch may not be available in all distribution repositories"
+          - "If installation failed, you may need to install from GitHub releases"
+          - "Visit: https://github.com/fastfetch-os/fastfetch/releases"
+      when: fastfetch_verify.rc != 0
+      
+    - name: Verify fastfetch installation
+      command: fastfetch --version
+      register: fastfetch_final_version
+      changed_when: false
+      when: fastfetch_verify.rc == 0
+      
+    - name: Display final fastfetch version
+      debug:
+        msg: "Fastfetch installation complete: {{ fastfetch_final_version.stdout | regex_replace('\\n.*', '') }}"
+      when: fastfetch_verify.rc == 0
+        
+    - name: Ensure fastfetch is in PATH
+      shell: which fastfetch
+      register: fastfetch_path
+      changed_when: false
+      when: fastfetch_verify.rc == 0
+      
+    - name: Display fastfetch binary location
+      debug:
+        msg: "Fastfetch binary location: {{ fastfetch_path.stdout }}"
+      when: fastfetch_verify.rc == 0
+
+    - name: Display fastfetch usage hint
+      debug:
+        msg: 
+          - "Fastfetch installation complete!"
+          - "Usage: fastfetch                    # Display system information"
+          - "       fastfetch --config presets   # List available presets"
+          - "       fastfetch --help             # Show all options"
+          - "Configuration: ~/.config/fastfetch/config.jsonc"
+      when: fastfetch_verify.rc == 0
+
+  handlers:
+    - name: refresh package cache
+      package:
+        update_cache: yes

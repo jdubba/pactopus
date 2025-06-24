@@ -1,0 +1,177 @@
+---
+# Ble.sh Detection Test Playbook
+# Tests ble.sh installation detection and functionality
+# Useful for debugging source-based installation issues
+
+- name: Test ble.sh Detection and Functionality
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: no  # ble.sh is installed in user space
+  
+  vars:
+    # ble.sh repository and installation details
+    ble_repo_name: "ble.sh"
+    
+    # Get SOURCE_INSTALL_LOCATION from pactopus config
+    source_install_location: "{{ ansible_env.HOME }}/source"
+    
+  tasks:
+    - name: Display system information
+      debug:
+        msg: 
+          - "OS Distribution: {{ ansible_distribution }}"
+          - "OS Version: {{ ansible_distribution_version }}"
+          - "OS Family: {{ ansible_os_family }}"
+          - "Architecture: {{ ansible_architecture }}"
+          - "User: {{ ansible_env.USER }}"
+          - "Home: {{ ansible_env.HOME }}"
+          - "Shell: {{ ansible_env.SHELL | default('Unknown') }}"
+          - "Source location: {{ source_install_location }}/{{ ble_repo_name }}"
+    
+    - name: Check if ble.sh installation exists
+      stat:
+        path: "{{ ansible_env.HOME }}/.local/share/blesh/ble.sh"
+      register: ble_install_check
+    
+    - name: Display installation status
+      debug:
+        msg: "ble.sh installation: {{ 'Found' if ble_install_check.stat.exists else 'Not found' }}"
+    
+    - name: Check ble.sh source repository
+      stat:
+        path: "{{ source_install_location }}/{{ ble_repo_name }}"
+      register: ble_source_check
+    
+    - name: Display source repository status
+      debug:
+        msg: "ble.sh source repository: {{ 'Found' if ble_source_check.stat.exists else 'Not found' }} at {{ source_install_location }}/{{ ble_repo_name }}"
+    
+    - name: Get ble.sh version from source
+      shell: |
+        if [ -f "{{ source_install_location }}/{{ ble_repo_name }}/ble.sh" ]; then
+          grep "^_ble_version=" "{{ source_install_location }}/{{ ble_repo_name }}/ble.sh" | head -1 | cut -d= -f2 | tr -d "'"
+        else
+          echo "not_found"
+        fi
+      register: ble_source_version
+      changed_when: false
+      when: ble_source_check.stat.exists
+    
+    - name: Display source version
+      debug:
+        msg: "ble.sh source version: {{ ble_source_version.stdout if ble_source_version.stdout != 'not_found' else 'Unknown' }}"
+      when: ble_source_check.stat.exists
+    
+    - name: Check if ble.sh is configured in .bashrc
+      shell: grep -n "ble.sh" "{{ ansible_env.HOME }}/.bashrc" 2>/dev/null || echo "not_found"
+      register: bashrc_check
+      changed_when: false
+    
+    - name: Display bashrc configuration status
+      debug:
+        msg: "ble.sh in .bashrc: {{ 'Configured' if bashrc_check.stdout != 'not_found' else 'Not configured' }}"
+    
+    - name: Show bashrc ble.sh lines if configured
+      debug:
+        msg: "ble.sh configuration lines: {{ bashrc_check.stdout_lines }}"
+      when: bashrc_check.stdout != "not_found"
+    
+    - name: Check if ble.sh is currently loaded in environment
+      shell: |
+        if [[ -n "${BLE_VERSION-}" ]]; then
+          echo "loaded_version_${BLE_VERSION}"
+        else
+          echo "not_loaded"
+        fi
+      register: ble_env_check
+      changed_when: false
+    
+    - name: Display environment status
+      debug:
+        msg: "ble.sh in current session: {{ ble_env_check.stdout }}"
+    
+    - name: Test ble.sh functionality (if installed)
+      shell: |
+        if [ -f "{{ ansible_env.HOME }}/.local/share/blesh/ble.sh" ]; then
+          # Test basic ble.sh loading
+          timeout 5 bash -c '. "{{ ansible_env.HOME }}/.local/share/blesh/ble.sh" --test-mode 2>/dev/null && echo "functional" || echo "load_failed"'
+        else
+          echo "not_installed"
+        fi
+      register: ble_function_test
+      changed_when: false
+      when: ble_install_check.stat.exists
+    
+    - name: Display functionality test result
+      debug:
+        msg: "ble.sh functionality test: {{ ble_function_test.stdout if ble_function_test is defined else 'Skipped (not installed)' }}"
+    
+    - name: Check ble.sh installation structure
+      find:
+        paths: "{{ ansible_env.HOME }}/.local/share/blesh"
+        file_type: file
+        patterns: "*.sh"
+      register: ble_files
+      when: ble_install_check.stat.exists
+    
+    - name: Display installation files
+      debug:
+        msg: "ble.sh installation files: {{ ble_files.files | length }} files found"
+      when: ble_install_check.stat.exists and ble_files is defined
+    
+    - name: Check Git repository status (if source exists)
+      shell: |
+        cd "{{ source_install_location }}/{{ ble_repo_name }}"
+        git status --porcelain 2>/dev/null | wc -l
+      register: git_status
+      changed_when: false
+      when: ble_source_check.stat.exists
+    
+    - name: Display Git repository status  
+      debug:
+        msg: "Git repository status: {{ 'Clean working directory' if git_status.stdout == '0' else git_status.stdout + ' uncommitted changes' }}"
+      when: ble_source_check.stat.exists and git_status is defined
+    
+    - name: Get Git remote information
+      shell: |
+        cd "{{ source_install_location }}/{{ ble_repo_name }}"
+        git remote get-url origin 2>/dev/null || echo "no_remote"
+      register: git_remote
+      changed_when: false
+      when: ble_source_check.stat.exists
+    
+    - name: Display Git remote
+      debug:
+        msg: "Git remote: {{ git_remote.stdout }}"
+      when: ble_source_check.stat.exists and git_remote is defined
+    
+    - name: Check required dependencies
+      shell: which {{ item }}
+      register: deps_check
+      failed_when: false
+      changed_when: false
+      loop:
+        - git
+        - bash
+        - make
+    
+    - name: Display dependency status
+      debug:
+        msg: "{{ item.item }}: {{ 'Available' if item.rc == 0 else 'Missing' }}"
+      loop: "{{ deps_check.results }}"
+      when: deps_check is defined
+    
+    - name: Summary of ble.sh detection
+      debug:
+        msg:
+          - "=== BLE.SH DETECTION SUMMARY ==="
+          - "Installation found: {{ 'Yes' if ble_install_check.stat.exists else 'No' }}"
+          - "Source repository: {{ 'Yes' if ble_source_check.stat.exists else 'No' }}"
+          - "Source version: {{ ble_source_version.stdout if ble_source_check.stat.exists and ble_source_version.stdout != 'not_found' else 'Unknown' }}"
+          - "Bashrc configured: {{ 'Yes' if bashrc_check.stdout != 'not_found' else 'No' }}"
+          - "Currently loaded: {{ 'Yes' if 'loaded' in ble_env_check.stdout else 'No' }}"
+          - "Functionality test: {{ ble_function_test.stdout if ble_function_test is defined else 'Skipped' }}"
+          - "Installation files: {{ ble_files.files | length if ble_files is defined else '0' }}"
+          - "Git repository: {{ 'Clean' if git_status.stdout == '0' else 'Modified' if ble_source_check.stat.exists else 'N/A' }}"
+          - "Installation type: Source-based (GitHub)"

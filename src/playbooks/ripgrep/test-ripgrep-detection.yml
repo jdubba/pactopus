@@ -1,0 +1,242 @@
+---
+# Ripgrep Detection Test Playbook
+# Tests ripgrep installation detection across distributions
+# Useful for debugging package management issues
+
+- name: Test Ripgrep Detection across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: no
+  
+  vars:
+    # Package name mappings for different distributions
+    ripgrep_packages:
+      Debian: ripgrep
+      Ubuntu: ripgrep
+      "Pop!_OS": ripgrep
+      "Linux Mint": ripgrep
+      elementary: ripgrep
+      RedHat: ripgrep
+      Fedora: ripgrep
+      CentOS: ripgrep
+      Rocky: ripgrep
+      AlmaLinux: ripgrep
+      Archlinux: ripgrep
+      Manjaro: ripgrep
+      openSUSE: ripgrep
+      SLES: ripgrep
+      Alpine: ripgrep
+
+  tasks:
+    - name: Display system information
+      debug:
+        msg: 
+          - "OS Distribution: {{ ansible_distribution }}"
+          - "OS Version: {{ ansible_distribution_version }}"
+          - "OS Family: {{ ansible_os_family }}"
+          - "Architecture: {{ ansible_architecture }}"
+          - "Kernel: {{ ansible_kernel }}"
+      
+    - name: Test ripgrep command availability
+      command: which rg
+      register: ripgrep_which
+      failed_when: false
+      changed_when: false
+      
+    - name: Display ripgrep binary location
+      debug:
+        msg: "Ripgrep binary found at: {{ ripgrep_which.stdout }}"
+      when: ripgrep_which.rc == 0
+      
+    - name: Display ripgrep not found message
+      debug:
+        msg: "Ripgrep binary not found in PATH"
+      when: ripgrep_which.rc != 0
+      
+    - name: Test ripgrep version command
+      command: rg --version
+      register: ripgrep_version
+      failed_when: false
+      changed_when: false
+      
+    - name: Display ripgrep version
+      debug:
+        msg: "Ripgrep version: {{ ripgrep_version.stdout | regex_replace('\\n.*', '') }}"
+      when: ripgrep_version.rc == 0
+      
+    - name: Display ripgrep version error
+      debug:
+        msg: "Error getting ripgrep version: {{ ripgrep_version.stderr }}"
+      when: ripgrep_version.rc != 0
+      
+    - name: Create test directory structure for ripgrep functionality test
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - /tmp/pactopus_rg_test
+        - /tmp/pactopus_rg_test/subdir
+      when: ripgrep_version.rc == 0
+      
+    - name: Create test files for ripgrep functionality test
+      copy:
+        content: "{{ item.content }}"
+        dest: "{{ item.path }}"
+        mode: '0644'
+      loop:
+        - path: /tmp/pactopus_rg_test/test1.txt
+          content: |
+            Hello World
+            This is a test file
+            Pattern to find: TESTPATTERN
+            Another line
+        - path: /tmp/pactopus_rg_test/test2.py
+          content: |
+            #!/usr/bin/env python3
+            def main():
+                print("TESTPATTERN found in Python")
+                return 0
+        - path: /tmp/pactopus_rg_test/subdir/test3.md
+          content: |
+            # Test Markdown
+            This file contains TESTPATTERN too
+            ## Section
+            More content here
+      when: ripgrep_version.rc == 0
+      
+    - name: Test basic ripgrep functionality
+      shell: cd /tmp/pactopus_rg_test && rg "TESTPATTERN" --count-matches
+      register: ripgrep_test
+      failed_when: false
+      changed_when: false
+      when: ripgrep_version.rc == 0
+      
+    - name: Display ripgrep functionality test result
+      debug:
+        msg: "Ripgrep test: {{ 'PASSED - Found ' + ripgrep_test.stdout + ' matches' if ripgrep_test.rc == 0 and ripgrep_test.stdout|int > 0 else 'FAILED' }}"
+      when: ripgrep_version.rc == 0 and ripgrep_test.rc == 0
+      
+    - name: Display ripgrep functionality test error
+      debug:
+        msg: "Ripgrep test failed: {{ ripgrep_test.stderr }}"
+      when: ripgrep_version.rc == 0 and ripgrep_test.rc != 0
+      
+    - name: Test ripgrep file type detection
+      shell: cd /tmp/pactopus_rg_test && rg "TESTPATTERN" --type py
+      register: ripgrep_type_test
+      failed_when: false
+      changed_when: false
+      when: ripgrep_version.rc == 0
+      
+    - name: Display file type test result
+      debug:
+        msg: "File type filtering: {{ 'PASSED' if ripgrep_type_test.rc == 0 and 'test2.py' in ripgrep_type_test.stdout else 'FAILED' }}"
+      when: ripgrep_version.rc == 0
+      
+    - name: Test ripgrep help command
+      command: rg --help
+      register: ripgrep_help
+      failed_when: false
+      changed_when: false
+      when: ripgrep_version.rc == 0
+      
+    - name: Test ripgrep supported file types
+      command: rg --type-list
+      register: ripgrep_types
+      failed_when: false
+      changed_when: false
+      when: ripgrep_version.rc == 0
+      
+    - name: Count supported file types
+      set_fact:
+        file_types_count: "{{ ripgrep_types.stdout_lines | length }}"
+      when: ripgrep_version.rc == 0 and ripgrep_types.rc == 0
+      
+    - name: Test ripgrep performance features
+      shell: rg --version | grep -E "(SIMD|AVX|SSE)"
+      register: ripgrep_features
+      failed_when: false
+      changed_when: false
+      when: ripgrep_version.rc == 0
+      
+    - name: Display performance features
+      debug:
+        msg: "Performance features: {{ ripgrep_features.stdout if ripgrep_features.rc == 0 else 'Standard build (no SIMD)' }}"
+      when: ripgrep_version.rc == 0
+      
+    - name: Clean up test directory
+      file:
+        path: /tmp/pactopus_rg_test
+        state: absent
+      when: ripgrep_version.rc == 0
+      
+    - name: Check package manager for ripgrep
+      debug:
+        msg: "Expected package name for {{ ansible_distribution }}: {{ ripgrep_packages[ansible_distribution] | default('ripgrep') }}"
+      
+    - name: Test package manager detection (Debian/Ubuntu)
+      command: dpkg -l ripgrep
+      register: dpkg_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "Debian"
+      
+    - name: Display dpkg check result
+      debug:
+        msg: "Package manager shows ripgrep is installed"
+      when: ansible_os_family == "Debian" and dpkg_check.rc == 0
+      
+    - name: Test package manager detection (RHEL/Fedora)
+      command: rpm -q ripgrep
+      register: rpm_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "RedHat"
+      
+    - name: Display rpm check result
+      debug:
+        msg: "Package manager shows ripgrep is installed: {{ rpm_check.stdout }}"
+      when: ansible_os_family == "RedHat" and rpm_check.rc == 0
+      
+    - name: Test package manager detection (Arch)
+      command: pacman -Q ripgrep
+      register: pacman_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "Archlinux"
+      
+    - name: Display pacman check result
+      debug:
+        msg: "Package manager shows ripgrep is installed: {{ pacman_check.stdout }}"
+      when: ansible_os_family == "Archlinux" and pacman_check.rc == 0
+      
+    - name: Check for manual installation
+      stat:
+        path: "{{ item }}"
+      register: manual_install_paths
+      loop:
+        - /usr/local/bin/rg
+        - "{{ ansible_env.HOME }}/.cargo/bin/rg"
+        - "{{ ansible_env.HOME }}/bin/rg"
+      when: ripgrep_version.rc == 0 and (dpkg_check.rc != 0 or rpm_check.rc != 0 or pacman_check.rc != 0)
+      
+    - name: Display manual installation detection
+      debug:
+        msg: "Manual installation found at: {{ item.item }}"
+      loop: "{{ manual_install_paths.results }}"
+      when: ripgrep_version.rc == 0 and item.stat.exists
+      
+    - name: Summary of ripgrep detection
+      debug:
+        msg:
+          - "=== RIPGREP DETECTION SUMMARY ==="
+          - "Binary available: {{ 'Yes' if ripgrep_which.rc == 0 else 'No' }}"
+          - "Version command works: {{ 'Yes' if ripgrep_version.rc == 0 else 'No' }}"
+          - "Functionality test: {{ 'Passed' if ripgrep_test.rc == 0 and ripgrep_test.stdout|int > 0 else 'Failed' if ripgrep_version.rc == 0 else 'Skipped' }}"
+          - "File type filtering: {{ 'Yes' if ripgrep_type_test.rc == 0 and 'test2.py' in ripgrep_type_test.stdout else 'No/Failed' if ripgrep_version.rc == 0 else 'N/A' }}"
+          - "Help command works: {{ 'Yes' if ripgrep_help.rc == 0 else 'No' if ripgrep_version.rc == 0 else 'N/A' }}"
+          - "Supported file types: {{ file_types_count | default('Unknown') }}"
+          - "Performance features: {{ 'Yes' if ripgrep_features.rc == 0 else 'Standard' if ripgrep_version.rc == 0 else 'N/A' }}"
+          - "Package installed: {{ 'Yes' if (dpkg_check.rc == 0 and ansible_os_family == 'Debian') or (rpm_check.rc == 0 and ansible_os_family == 'RedHat') or (pacman_check.rc == 0 and ansible_os_family == 'Archlinux') else 'Manual/Unknown' if ripgrep_version.rc == 0 else 'No' }}"

@@ -11,10 +11,112 @@ readonly SCRIPT_NAME=$(basename "$0")
 readonly MIN_ANSIBLE_VERSION="2.10"
 readonly MIN_ANSIBLE_COMMUNITY_VERSION="8.0.0"
 
+# Configuration
+readonly CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/pactopus"
+readonly CONFIG_FILE="${CONFIG_DIR}/pactopus.toml"
+
+# Configuration variables (with defaults)
+declare -g SOURCE_INSTALL_LOCATION="$HOME/source"
+
 # OS Detection variables
 declare -g OS_ID=""
 declare -g OS_VERSION=""
 declare -g OS_FAMILY=""
+
+# Initialize default configuration file
+init_config() {
+    if [[ ! -d "$CONFIG_DIR" ]]; then
+        echo "Creating configuration directory: $CONFIG_DIR"
+        mkdir -p "$CONFIG_DIR"
+    fi
+    
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        echo "Creating default configuration file: $CONFIG_FILE"
+        cat > "$CONFIG_FILE" << 'EOF'
+# Pactopus Configuration File
+# This file uses TOML format for configuration settings
+
+[settings]
+# Source installation location for development tools and projects
+# Default: ~/source
+SOURCE_INSTALL_LOCATION = "~/source"
+
+[package_sets]
+# Future: Define custom package sets here
+# minimal = ["git", "curl", "make"]
+# development = ["git", "curl", "make", "stow", "fzf", "bat", "ripgrep"]
+
+[repositories]
+# Future: Custom repository configurations
+# enable_backports = true
+# enable_epel = true
+EOF
+        echo "Default configuration created at $CONFIG_FILE"
+    fi
+}
+
+# Load configuration from TOML file
+load_config() {
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        init_config
+    fi
+    
+    # Simple TOML parser for our specific needs
+    # This handles basic key = "value" pairs in [settings] section
+    local in_settings_section=false
+    
+    while IFS= read -r line; do
+        # Remove leading/trailing whitespace
+        line=$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        
+        # Skip empty lines and comments
+        [[ -z "$line" || "$line" =~ ^# ]] && continue
+        
+        # Check for section headers
+        if [[ "$line" =~ ^\[.*\]$ ]]; then
+            if [[ "$line" == "[settings]" ]]; then
+                in_settings_section=true
+            else
+                in_settings_section=false
+            fi
+            continue
+        fi
+        
+        # Process settings if we're in the [settings] section
+        if [[ "$in_settings_section" == true && "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=[[:space:]]*\".*\"$ ]]; then
+            # Extract key and value
+            local key=$(echo "$line" | sed 's/[[:space:]]*=.*//')
+            local value=$(echo "$line" | sed 's/.*=[[:space:]]*"\(.*\)".*/\1/')
+            
+            # Expand tilde in paths
+            if [[ "$value" =~ ^\~.* ]]; then
+                value="${value/#\~/$HOME}"
+            fi
+            
+            # Set the corresponding variable
+            case "$key" in
+                "SOURCE_INSTALL_LOCATION")
+                    SOURCE_INSTALL_LOCATION="$value"
+                    ;;
+                *)
+                    echo "Warning: Unknown configuration key '$key' in $CONFIG_FILE" >&2
+                    ;;
+            esac
+        fi
+    done < "$CONFIG_FILE"
+}
+
+# Display current configuration
+show_config() {
+    echo "Pactopus Configuration"
+    echo "======================"
+    echo "Configuration file: $CONFIG_FILE"
+    echo ""
+    echo "Settings:"
+    echo "  SOURCE_INSTALL_LOCATION = \"$SOURCE_INSTALL_LOCATION\""
+    echo ""
+    echo "To modify configuration, edit: $CONFIG_FILE"
+}
 
 # Detect the current operating system
 detect_os() {
@@ -295,6 +397,27 @@ version() {
     echo "pactopus version ${PACTOPUS_VERSION}"
 }
 
+# Validate sudo access and cache credentials
+validate_sudo_access() {
+    echo "Validating sudo access for package management..."
+    
+    # Test if we already have sudo access (cached)
+    if sudo -n true 2>/dev/null; then
+        echo "Sudo access already available"
+        return 0
+    fi
+    
+    # Test sudo access and cache credentials
+    if sudo -v; then
+        echo "Sudo access validated and credentials cached"
+        return 0
+    else
+        echo "Error: Failed to validate sudo access" >&2
+        echo "Note: Some packages may not require sudo and could still work" >&2
+        return 1
+    fi
+}
+
 # Run ansible playbook for package management
 run_ansible_playbook() {
     local action="$1"
@@ -333,6 +456,29 @@ run_ansible_playbook() {
         return 1
     fi
     
+    # Check if any playbooks require sudo access
+    local needs_sudo=false
+    for package in "${packages[@]}"; do
+        local playbook_path="${playbook_dir}/${package}/${action}-${package}.yml"
+        if [[ -f "$playbook_path" ]] && grep -q "become: yes" "$playbook_path" 2>/dev/null; then
+            needs_sudo=true
+            break
+        fi
+    done
+    
+    # Validate sudo access only if needed
+    if $needs_sudo; then
+        if ! validate_sudo_access; then
+            echo "Warning: Some playbooks require sudo access but validation failed" >&2
+            echo "Continuing anyway - packages that don't need sudo may still work" >&2
+        fi
+    else
+        echo "No sudo access required for selected packages"
+    fi
+    
+    local success_count=0
+    local total_count=${#packages[@]}
+    
     # Process each package
     for package in "${packages[@]}"; do
         local playbook_path="${playbook_dir}/${package}/${action}-${package}.yml"
@@ -344,23 +490,55 @@ run_ansible_playbook() {
         
         echo "Running ${action} playbook for ${package}..."
         
-        # Run the ansible playbook with sudo password prompt
-        if ansible-playbook -i "$inventory_path" "$playbook_path" --ask-become-pass; then
+        # Prepare extra variables for ansible
+        local extra_vars="source_install_location='$SOURCE_INSTALL_LOCATION'"
+        
+        # Run the ansible playbook with conditional become flag
+        local become_flag=""
+        if grep -q "become: yes" "$playbook_path" 2>/dev/null; then
+            become_flag="--become"
+        fi
+        
+        if ansible-playbook -i "$inventory_path" "$playbook_path" $become_flag --extra-vars "$extra_vars"; then
             echo "Successfully ${action}ed ${package}"
+            ((success_count++)) || true
         else
             echo "Error: Failed to ${action} ${package}" >&2
         fi
+        
+        # Refresh sudo credentials if we have more packages to process
+        if [[ $package != "${packages[-1]}" ]]; then
+            # Keep sudo credentials fresh for long-running operations
+            sudo -v 2>/dev/null || true
+        fi
     done
+    
+    # Display summary
+    echo ""
+    echo "Package ${action} summary: ${success_count}/${total_count} successful"
+    
+    if [[ $success_count -eq $total_count ]]; then
+        echo "All packages ${action}ed successfully!"
+        return 0
+    elif [[ $success_count -gt 0 ]]; then
+        echo "Some packages ${action}ed successfully, but some failed."
+        return 1
+    else
+        echo "All package ${action} operations failed."
+        return 1
+    fi
 }
 
 # Install packages using ansible playbooks
 install_packages() {
     run_ansible_playbook "install" "$@"
+    return $?
 }
 
 # Remove packages using ansible playbooks
 remove_packages() {
     run_ansible_playbook "remove" "$@"
+    return $?
 }
 
 # Print help information
@@ -375,25 +553,39 @@ Commands:
     help         Display this help message
     setup        Setup ansible environment and dependencies
     check        Check system requirements and ansible status
+    config       Display current configuration settings
     install      Install one or more packages
     remove       Remove one or more packages
 
 Options:
     -h, --help   Display help information
 
+Configuration:
+    Configuration file: ~/.config/pactopus/pactopus.toml
+    Settings:
+      SOURCE_INSTALL_LOCATION - Directory for source installations (default: ~/source)
+
+Available packages:
+    git, gawk, make, stow, fzf, curl, fastfetch, bat, bash-completion, ripgrep, ble, neovim, starship, wget, sudo, which, xh, yai
+
 Examples:
     ${SCRIPT_NAME} version
     ${SCRIPT_NAME} help
     ${SCRIPT_NAME} setup
     ${SCRIPT_NAME} check
-    ${SCRIPT_NAME} install git curl
+    ${SCRIPT_NAME} config
+    ${SCRIPT_NAME} install git curl make
     ${SCRIPT_NAME} remove git
+    ${SCRIPT_NAME} install bat bash-completion ripgrep
 
 EOF
 }
 
 # Main entry point
 main() {
+    # Load configuration before processing commands
+    load_config
+    
     # Handle no arguments
     if [[ $# -eq 0 ]]; then
         help
@@ -419,21 +611,28 @@ main() {
             echo "OS: $OS_ID ($OS_FAMILY) $OS_VERSION"
             check_ansible
             ;;
+        config)
+            show_config
+            ;;
         install)
             if [[ $# -eq 0 ]]; then
                 echo "Error: No packages specified for installation" >&2
                 echo "Usage: ${SCRIPT_NAME} install <package1> [package2] ..." >&2
+                echo "Available packages: git, gawk, make, stow, fzf, curl, fastfetch, bat, bash-completion, ripgrep, ble, neovim, starship, wget, sudo, which, xh, yai" >&2
                 exit 1
             fi
             install_packages "$@"
+            exit $?
             ;;
         remove)
             if [[ $# -eq 0 ]]; then
                 echo "Error: No packages specified for removal" >&2
                 echo "Usage: ${SCRIPT_NAME} remove <package1> [package2] ..." >&2
+                echo "Available packages: git, gawk, make, stow, fzf, curl, fastfetch, bat, bash-completion, ripgrep, ble, neovim, starship, wget, sudo, which, xh, yai" >&2
                 exit 1
             fi
             remove_packages "$@"
+            exit $?
             ;;
         *)
             echo "Error: Unknown command '${command}'" >&2

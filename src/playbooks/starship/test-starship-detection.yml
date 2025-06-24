@@ -1,0 +1,259 @@
+---
+# Starship Detection Test Playbook
+# Tests starship installation detection and functionality
+# Useful for debugging cross-distribution installation issues
+
+- name: Test Starship Detection and Functionality
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: no
+  
+  vars:
+    # Rolling release distributions (might have native packages)
+    rolling_distributions:
+      - Archlinux
+      - Manjaro
+      - Fedora
+      - openSUSE Tumbleweed
+    
+    # Stable distributions (use install script)
+    stable_distributions:
+      - Debian
+      - Ubuntu
+      - "Pop!_OS"
+      - "Linux Mint"
+      - elementary
+      - RedHat
+      - CentOS
+      - Rocky
+      - AlmaLinux
+      - "Amazon Linux"
+      - Alpine
+      - SLES
+      - "openSUSE Leap"
+    
+    # Distributions with native starship packages
+    starship_package_distributions:
+      - Archlinux
+      - Manjaro
+      - Fedora
+    
+    # Starship paths
+    starship_binary_path: "/usr/local/bin/starship"
+    starship_config_path: "{{ ansible_env.HOME }}/.config/starship.toml"
+    
+  tasks:
+    - name: Display system information
+      debug:
+        msg: 
+          - "OS Distribution: {{ ansible_distribution }}"
+          - "OS Version: {{ ansible_distribution_version }}"
+          - "OS Family: {{ ansible_os_family }}"
+          - "Architecture: {{ ansible_architecture }}"
+          - "Package Manager: {{ ansible_pkg_mgr }}"
+          - "Shell: {{ ansible_env.SHELL | default('Unknown') }}"
+    
+    - name: Determine distribution classification
+      set_fact:
+        is_rolling_distribution: "{{ ansible_distribution in rolling_distributions }}"
+        is_stable_distribution: "{{ ansible_distribution in stable_distributions }}"
+        has_native_package: "{{ ansible_distribution in starship_package_distributions }}"
+
+    - name: Display distribution classification
+      debug:
+        msg: 
+          - "Distribution type: {{ 'Rolling' if is_rolling_distribution else 'Stable' if is_stable_distribution else 'Unknown' }}"
+          - "Native package available: {{ 'Yes' if has_native_package else 'No' }}"
+          - "Expected installation method: {{ 'Package manager' if has_native_package else 'Install script' }}"
+    
+    - name: Check if starship is installed via command
+      command: starship --version
+      register: starship_version_check
+      failed_when: false
+      changed_when: false
+    
+    - name: Display starship version status
+      debug:
+        msg: "Starship command: {{ 'Available' if starship_version_check.rc == 0 else 'Not available' }}"
+    
+    - name: Show starship version details
+      debug:
+        msg: "Starship version: {{ starship_version_check.stdout | regex_replace('\\n.*', '') }}"
+      when: starship_version_check.rc == 0
+    
+    - name: Check starship binary location
+      shell: which starship
+      register: starship_location
+      failed_when: false
+      changed_when: false
+    
+    - name: Display starship binary location
+      debug:
+        msg: "Starship binary location: {{ starship_location.stdout if starship_location.rc == 0 else 'Not found' }}"
+    
+    - name: Check if binary installation exists (/usr/local/bin)
+      stat:
+        path: "{{ starship_binary_path }}"
+      register: starship_binary_check
+    
+    - name: Display binary installation status
+      debug:
+        msg: "Binary installation (/usr/local/bin): {{ 'Found' if starship_binary_check.stat.exists else 'Not found' }}"
+    
+    - name: Check package manager installation (if native packages available)
+      shell: |
+        case "{{ ansible_pkg_mgr }}" in
+          pacman)
+            pacman -Qi starship 2>/dev/null || echo "not_installed"
+            ;;
+          dnf|yum)
+            dnf list installed starship 2>/dev/null || echo "not_installed"
+            ;;
+          zypper)
+            zypper search -i starship 2>/dev/null || echo "not_installed"
+            ;;
+          *)
+            echo "unsupported_package_manager"
+            ;;
+        esac
+      register: package_check
+      failed_when: false
+      changed_when: false
+      when: has_native_package
+    
+    - name: Display package manager installation status
+      debug:
+        msg: "Package manager installation: {{ 'Installed' if package_check.stdout != 'not_installed' and 'not_installed' not in package_check.stdout else 'Not installed' }}"
+      when: has_native_package and package_check is defined
+    
+    - name: Check starship configuration file
+      stat:
+        path: "{{ starship_config_path }}"
+      register: starship_config_check
+    
+    - name: Display configuration status
+      debug:
+        msg: "Starship config file: {{ 'Exists' if starship_config_check.stat.exists else 'Not found' }} at ~/.config/starship.toml"
+    
+    - name: Check configuration file size and modification time
+      debug:
+        msg: 
+          - "Config file size: {{ starship_config_check.stat.size }} bytes"
+          - "Last modified: {{ ansible_date_time.date }} ({{ (ansible_date_time.epoch | int) - (starship_config_check.stat.mtime | int) }} seconds ago)"
+      when: starship_config_check.stat.exists
+    
+    - name: Test starship functionality
+      shell: |
+        timeout 5 starship config 2>/dev/null && echo "functional" || echo "not_functional"
+      register: starship_function_test
+      failed_when: false
+      changed_when: false
+      when: starship_version_check.rc == 0
+    
+    - name: Display functionality test result
+      debug:
+        msg: "Starship functionality test: {{ starship_function_test.stdout if starship_function_test is defined else 'Skipped (not installed)' }}"
+    
+    - name: Check shell integration in .bashrc
+      shell: grep -n "starship" "{{ ansible_env.HOME }}/.bashrc" 2>/dev/null || echo "not_found"
+      register: bashrc_integration_check
+      changed_when: false
+    
+    - name: Display shell integration status
+      debug:
+        msg: "Shell integration (.bashrc): {{ 'Configured' if bashrc_integration_check.stdout != 'not_found' else 'Not configured' }}"
+    
+    - name: Show shell integration lines
+      debug:
+        msg: "Starship integration lines: {{ bashrc_integration_check.stdout_lines }}"
+      when: bashrc_integration_check.stdout != "not_found"
+    
+    - name: Check if starship is in current environment
+      shell: |
+        if command -v starship >/dev/null 2>&1; then
+          echo "available_in_path"
+        else
+          echo "not_in_path"
+        fi
+      register: starship_env_check
+      changed_when: false
+    
+    - name: Display environment status
+      debug:
+        msg: "Starship in current PATH: {{ starship_env_check.stdout }}"
+    
+    - name: Test starship preset command
+      shell: |
+        timeout 10 starship preset --list 2>/dev/null | head -5 || echo "preset_failed"
+      register: starship_preset_test
+      failed_when: false
+      changed_when: false
+      when: starship_version_check.rc == 0
+    
+    - name: Display preset test result
+      debug:
+        msg: "Starship preset functionality: {{ 'Working' if 'preset_failed' not in starship_preset_test.stdout else 'Failed' }}"
+      when: starship_version_check.rc == 0 and starship_preset_test is defined
+    
+    - name: Check installation script connectivity
+      uri:
+        url: "https://starship.rs/install.sh"
+        method: HEAD
+        timeout: 10
+      register: install_script_check
+      failed_when: false
+      when: not has_native_package
+    
+    - name: Display install script connectivity
+      debug:
+        msg: "Install script connectivity: {{ 'Available' if install_script_check.status == 200 else 'Failed' if install_script_check is defined else 'Skipped' }}"
+      when: not has_native_package
+    
+    - name: Check required dependencies
+      shell: which {{ item }}
+      register: deps_check
+      failed_when: false
+      changed_when: false
+      loop:
+        - curl
+        - bash
+    
+    - name: Display dependency status
+      debug:
+        msg: "{{ item.item }}: {{ 'Available' if item.rc == 0 else 'Missing' }}"
+      loop: "{{ deps_check.results }}"
+      when: deps_check is defined
+    
+    - name: Check starship prompt rendering capability
+      shell: |
+        if command -v starship >/dev/null 2>&1; then
+          timeout 5 starship prompt 2>/dev/null | head -c 100 && echo "prompt_ok" || echo "prompt_failed"
+        else
+          echo "not_installed"
+        fi
+      register: starship_prompt_test
+      failed_when: false
+      changed_when: false
+      when: starship_version_check.rc == 0
+    
+    - name: Display prompt rendering test
+      debug:
+        msg: "Starship prompt rendering: {{ 'Working' if 'prompt_ok' in starship_prompt_test.stdout else 'Failed' if starship_prompt_test is defined else 'Skipped' }}"
+      when: starship_version_check.rc == 0
+    
+    - name: Summary of starship detection
+      debug:
+        msg:
+          - "=== STARSHIP DETECTION SUMMARY ==="
+          - "Distribution: {{ ansible_distribution }} ({{ 'Rolling' if is_rolling_distribution else 'Stable' }})"
+          - "Native package available: {{ 'Yes' if has_native_package else 'No' }}"
+          - "Starship installed: {{ 'Yes' if starship_version_check.rc == 0 else 'No' }}"
+          - "Installation method: {{ 'Package manager' if has_native_package and package_check.stdout != 'not_installed' else 'Install script' if starship_binary_check.stat.exists else 'Unknown/None' }}"
+          - "Version: {{ starship_version_check.stdout | regex_replace('\\n.*', '') if starship_version_check.rc == 0 else 'N/A' }}"
+          - "Binary location: {{ starship_location.stdout if starship_location.rc == 0 else 'N/A' }}"
+          - "Configuration: {{ 'Present' if starship_config_check.stat.exists else 'None' }}"
+          - "Shell integration: {{ 'Configured' if bashrc_integration_check.stdout != 'not_found' else 'Not configured' }}"
+          - "Functionality: {{ starship_function_test.stdout if starship_function_test is defined else 'N/A' }}"
+          - "Prompt rendering: {{ 'Working' if 'prompt_ok' in starship_prompt_test.stdout else 'Failed' if starship_prompt_test is defined else 'N/A' }}"
+          - "Install script: {{ 'Available' if install_script_check.status == 200 else 'Failed' if install_script_check is defined else 'N/A' }}"

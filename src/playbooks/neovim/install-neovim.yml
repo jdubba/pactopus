@@ -1,0 +1,286 @@
+---
+# Neovim Installation Playbook
+# For rolling distributions: use native packages
+# For stable distributions: install latest binary release to /opt
+# Repository: https://github.com/neovim/neovim
+
+- name: Install Neovim across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Package name mappings for rolling distributions
+    neovim_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.)
+      Debian: neovim
+      Ubuntu: neovim
+      "Pop!_OS": neovim
+      "Linux Mint": neovim
+      elementary: neovim
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: neovim
+      Fedora: neovim
+      CentOS: neovim
+      Rocky: neovim
+      AlmaLinux: neovim
+      # Arch family
+      Archlinux: neovim
+      Manjaro: neovim
+      # SUSE family
+      openSUSE: neovim
+      SLES: neovim
+      # Alpine
+      Alpine: neovim
+    
+    # Rolling release distributions (use native packages)
+    rolling_distributions:
+      - Archlinux
+      - Manjaro
+      - Fedora
+      - openSUSE Tumbleweed
+    
+    # Stable distributions (use binary releases)
+    stable_distributions:
+      - Debian
+      - Ubuntu
+      - "Pop!_OS"
+      - "Linux Mint"
+      - elementary
+      - RedHat
+      - CentOS
+      - Rocky
+      - AlmaLinux
+      - "Amazon Linux"
+      - Alpine
+      - SLES
+      - "openSUSE Leap"
+    
+    # Ubuntu-based distributions
+    ubuntu_derivatives:
+      - Ubuntu
+      - "Pop!_OS"
+      - "Linux Mint"
+      - elementary
+    
+    # Neovim binary release information
+    neovim_repo: "neovim/neovim"
+    neovim_install_dir: "/opt/neovim"
+    neovim_binary_link: "/usr/local/bin/nvim"
+
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Determine if distribution is rolling or stable
+      set_fact:
+        is_rolling_distribution: "{{ ansible_distribution in rolling_distributions }}"
+        is_stable_distribution: "{{ ansible_distribution in stable_distributions }}"
+
+    - name: Display distribution type and installation method
+      debug:
+        msg: 
+          - "Distribution type: {{ 'Rolling' if is_rolling_distribution else 'Stable' }}"
+          - "Installation method: {{ 'Native package manager' if is_rolling_distribution else 'GitHub binary release to /opt' }}"
+
+    # Rolling distribution installation (native packages)
+    - name: Enable EPEL repository (RHEL family rolling)
+      dnf:
+        name: epel-release
+        state: present
+      when: ansible_os_family == "RedHat" and ansible_distribution == "Fedora"
+      ignore_errors: yes
+
+    - name: Ensure package cache is updated (rolling distributions)
+      package:
+        update_cache: yes
+      when: is_rolling_distribution
+
+    - name: Check if neovim is already installed (rolling)
+      command: nvim --version
+      register: neovim_version_check_rolling
+      failed_when: false
+      changed_when: false
+      when: is_rolling_distribution
+
+    - name: Install/upgrade neovim (Arch Linux)
+      pacman:
+        name: "{{ neovim_packages[ansible_distribution] | default('neovim') }}"
+        state: latest
+      when: ansible_os_family == "Archlinux" and is_rolling_distribution
+
+    - name: Install/upgrade neovim (Fedora)
+      dnf:
+        name: "{{ neovim_packages[ansible_distribution] | default('neovim') }}"
+        state: latest
+      when: ansible_os_family == "RedHat" and ansible_distribution == "Fedora" and is_rolling_distribution
+
+    - name: Install/upgrade neovim (SUSE rolling)
+      zypper:
+        name: "{{ neovim_packages[ansible_distribution] | default('neovim') }}"
+        state: latest
+      when: ansible_os_family == "Suse" and is_rolling_distribution
+
+    # Stable distribution installation (GitHub binary releases)
+    - name: Check if neovim is already installed (stable)
+      command: nvim --version
+      register: neovim_version_check_stable
+      failed_when: false
+      changed_when: false
+      when: is_stable_distribution
+
+    - name: Display current neovim version if installed
+      debug:
+        msg: "Neovim is already installed: {{ (neovim_version_check_rolling.stdout if is_rolling_distribution else neovim_version_check_stable.stdout) | regex_replace('\\n.*', '') }}"
+      when: (is_rolling_distribution and neovim_version_check_rolling.rc == 0) or (is_stable_distribution and neovim_version_check_stable.rc == 0)
+
+    - name: Get latest neovim release information from GitHub
+      uri:
+        url: "https://api.github.com/repos/{{ neovim_repo }}/releases/latest"
+        method: GET
+        return_content: yes
+      register: neovim_release_info
+      when: is_stable_distribution
+
+    - name: Set neovim version facts
+      set_fact:
+        neovim_latest_version: "{{ neovim_release_info.json.tag_name }}"
+        neovim_download_url: "{{ neovim_release_info.json.assets | selectattr('name', 'match', '^nvim-linux-x86_64\\.tar\\.gz$') | map(attribute='browser_download_url') | list | first | default('') }}"
+      when: is_stable_distribution and neovim_release_info.status == 200
+
+    - name: Display latest neovim version information
+      debug:
+        msg:
+          - "Latest neovim version: {{ neovim_latest_version }}"
+          - "Download URL: {{ neovim_download_url }}"
+      when: is_stable_distribution and neovim_latest_version is defined and neovim_download_url != ""
+
+    - name: Display download URL error
+      debug:
+        msg:
+          - "ERROR: Could not find Linux x86_64 binary in neovim release assets"
+          - "Available assets: {{ neovim_release_info.json.assets | map(attribute='name') | list }}"
+      when: is_stable_distribution and neovim_latest_version is defined and neovim_download_url == ""
+
+    - name: Create neovim installation directory
+      file:
+        path: "{{ neovim_install_dir }}"
+        state: directory
+        mode: '0755'
+      when: is_stable_distribution
+
+    - name: Check if current installation is up to date
+      shell: |
+        if [ -f "{{ neovim_install_dir }}/bin/nvim" ]; then
+          current_version=$({{ neovim_install_dir }}/bin/nvim --version | head -1 | awk '{print $2}')
+          if [ "$current_version" = "{{ neovim_latest_version }}" ]; then
+            echo "up_to_date"
+          else
+            echo "outdated"
+          fi
+        else
+          echo "not_installed"
+        fi
+      register: neovim_update_check
+      when: is_stable_distribution and neovim_latest_version is defined
+      changed_when: false
+
+    - name: Display update status
+      debug:
+        msg: "Neovim status: {{ neovim_update_check.stdout }}"
+      when: is_stable_distribution and neovim_update_check is defined
+
+    - name: Download neovim binary release
+      get_url:
+        url: "{{ neovim_download_url }}"
+        dest: "/tmp/neovim-{{ neovim_latest_version }}.tar.gz"
+        mode: '0644'
+      when: is_stable_distribution and neovim_update_check.stdout != "up_to_date" and neovim_download_url != ""
+      register: neovim_download
+
+    - name: Extract neovim binary release
+      unarchive:
+        src: "/tmp/neovim-{{ neovim_latest_version }}.tar.gz"
+        dest: "/tmp"
+        remote_src: yes
+      when: is_stable_distribution and neovim_download.changed
+      register: neovim_extract
+
+    - name: Install neovim to /opt
+      shell: |
+        rm -rf {{ neovim_install_dir }}/*
+        cp -r /tmp/nvim-linux-x86_64/* {{ neovim_install_dir }}/
+        chmod +x {{ neovim_install_dir }}/bin/nvim
+      when: is_stable_distribution and neovim_extract.changed
+
+    - name: Create symbolic link to nvim binary
+      file:
+        src: "{{ neovim_install_dir }}/bin/nvim"
+        dest: "{{ neovim_binary_link }}"
+        state: link
+        force: yes
+      when: is_stable_distribution and neovim_extract.changed
+
+    - name: Ensure /usr/local/bin is in PATH
+      lineinfile:
+        path: /etc/environment
+        line: 'PATH="/usr/local/bin:$PATH"'
+        create: yes
+        backup: yes
+      when: is_stable_distribution and neovim_extract.changed
+
+    - name: Clean up downloaded files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "/tmp/neovim-{{ neovim_latest_version }}.tar.gz"
+        - "/tmp/nvim-linux-x86_64"
+      when: is_stable_distribution and neovim_download.changed
+
+    # Verification for both installation methods
+    - name: Verify neovim installation
+      command: nvim --version
+      register: neovim_final_version
+      changed_when: false
+
+    - name: Display final neovim version
+      debug:
+        msg: "Neovim installation complete: {{ neovim_final_version.stdout | regex_replace('\\n.*', '') }}"
+
+    - name: Ensure neovim is in PATH
+      shell: which nvim
+      register: neovim_path
+      changed_when: false
+
+    - name: Display neovim binary location
+      debug:
+        msg: "Neovim binary location: {{ neovim_path.stdout }}"
+
+    - name: Display installation method used
+      debug:
+        msg: "Installation method: {{ 'Package manager (' + ansible_pkg_mgr + ')' if is_rolling_distribution else 'GitHub binary release (' + neovim_latest_version + ')' }}"
+
+    - name: Display neovim usage and configuration hints
+      debug:
+        msg:
+          - "Neovim installation complete!"
+          - "Usage: nvim [file]                    # Edit file with neovim"
+          - "       nvim +PlugInstall              # Install plugins (if using vim-plug)"
+          - "       nvim --help                    # Show help"
+          - ""
+          - "Configuration:"
+          - "  Config directory: ~/.config/nvim/"
+          - "  Main config: ~/.config/nvim/init.vim or ~/.config/nvim/init.lua"
+          - ""
+          - "Installation details:"
+          - "  Method: {{ 'Native package' if is_rolling_distribution else 'Binary release to /opt' }}"
+          - "  Version: {{ neovim_final_version.stdout | regex_replace('\\n.*', '') }}"
+          - "  Binary: {{ neovim_path.stdout }}"
+
+  handlers:
+    - name: refresh package cache
+      package:
+        update_cache: yes

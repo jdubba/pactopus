@@ -1,0 +1,180 @@
+---
+# Stow Detection Test Playbook
+# Tests stow installation detection across distributions
+# Useful for debugging package management issues
+
+- name: Test Stow Detection across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: no
+  
+  vars:
+    # Package name mappings for different distributions
+    stow_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.)
+      Debian: stow
+      Ubuntu: stow
+      "Pop!_OS": stow
+      "Linux Mint": stow
+      elementary: stow
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: stow
+      Fedora: stow
+      CentOS: stow
+      Rocky: stow
+      AlmaLinux: stow
+      # Arch family
+      Archlinux: stow
+      Manjaro: stow
+      # SUSE family
+      openSUSE: stow
+      SLES: stow
+      # Alpine
+      Alpine: stow
+
+  tasks:
+    - name: Display system information
+      debug:
+        msg: 
+          - "OS Distribution: {{ ansible_distribution }}"
+          - "OS Version: {{ ansible_distribution_version }}"
+          - "OS Family: {{ ansible_os_family }}"
+          - "Architecture: {{ ansible_architecture }}"
+          - "Kernel: {{ ansible_kernel }}"
+      
+    - name: Test stow command availability
+      command: which stow
+      register: stow_which
+      failed_when: false
+      changed_when: false
+      
+    - name: Display stow binary location
+      debug:
+        msg: "Stow binary found at: {{ stow_which.stdout }}"
+      when: stow_which.rc == 0
+      
+    - name: Display stow not found message
+      debug:
+        msg: "Stow binary not found in PATH"
+      when: stow_which.rc != 0
+      
+    - name: Test stow version command
+      command: stow --version
+      register: stow_version
+      failed_when: false
+      changed_when: false
+      
+    - name: Display stow version
+      debug:
+        msg: "Stow version: {{ stow_version.stdout | regex_replace('\\n.*', '') }}"
+      when: stow_version.rc == 0
+      
+    - name: Display stow version error
+      debug:
+        msg: "Error getting stow version: {{ stow_version.stderr }}"
+      when: stow_version.rc != 0
+      
+    - name: Create test directory structure for stow functionality test
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - /tmp/pactopus_stow_test
+        - /tmp/pactopus_stow_test/source
+        - /tmp/pactopus_stow_test/target
+        - /tmp/pactopus_stow_test/source/testpkg
+      when: stow_version.rc == 0
+      
+    - name: Create test file for stow functionality test
+      copy:
+        content: "This is a test file for pactopus stow detection"
+        dest: /tmp/pactopus_stow_test/source/testpkg/testfile.txt
+        mode: '0644'
+      when: stow_version.rc == 0
+      
+    - name: Test basic stow functionality
+      shell: cd /tmp/pactopus_stow_test && stow -t target -d source testpkg
+      register: stow_test
+      failed_when: false
+      changed_when: false
+      when: stow_version.rc == 0
+      
+    - name: Check if stow created symlink correctly
+      stat:
+        path: /tmp/pactopus_stow_test/target/testfile.txt
+      register: stow_symlink_check
+      when: stow_version.rc == 0 and stow_test.rc == 0
+      
+    - name: Display stow functionality test result
+      debug:
+        msg: "Stow test: {{ 'SUCCESS - Symlink created' if stow_symlink_check.stat.islnk else 'FAILED - No symlink created' }}"
+      when: stow_version.rc == 0 and stow_test.rc == 0
+      
+    - name: Display stow functionality test error
+      debug:
+        msg: "Stow test failed: {{ stow_test.stderr }}"
+      when: stow_version.rc == 0 and stow_test.rc != 0
+      
+    - name: Clean up stow test
+      shell: cd /tmp/pactopus_stow_test && stow -t target -d source -D testpkg
+      register: stow_cleanup
+      failed_when: false
+      changed_when: false
+      when: stow_version.rc == 0 and stow_test.rc == 0
+      
+    - name: Clean up test directory
+      file:
+        path: /tmp/pactopus_stow_test
+        state: absent
+      when: stow_version.rc == 0
+      
+    - name: Check package manager for stow
+      debug:
+        msg: "Expected package name for {{ ansible_distribution }}: {{ stow_packages[ansible_distribution] | default('stow') }}"
+      
+    - name: Test package manager detection (Debian/Ubuntu)
+      command: dpkg -l stow
+      register: dpkg_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "Debian"
+      
+    - name: Display dpkg check result
+      debug:
+        msg: "Package manager shows stow is installed"
+      when: ansible_os_family == "Debian" and dpkg_check.rc == 0
+      
+    - name: Test package manager detection (RHEL/Fedora)
+      command: rpm -q stow
+      register: rpm_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "RedHat"
+      
+    - name: Display rpm check result
+      debug:
+        msg: "Package manager shows stow is installed: {{ rpm_check.stdout }}"
+      when: ansible_os_family == "RedHat" and rpm_check.rc == 0
+      
+    - name: Test package manager detection (Arch)
+      command: pacman -Q stow
+      register: pacman_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "Archlinux"
+      
+    - name: Display pacman check result
+      debug:
+        msg: "Package manager shows stow is installed: {{ pacman_check.stdout }}"
+      when: ansible_os_family == "Archlinux" and pacman_check.rc == 0
+      
+    - name: Summary of stow detection
+      debug:
+        msg:
+          - "=== STOW DETECTION SUMMARY ==="
+          - "Binary available: {{ 'Yes' if stow_which.rc == 0 else 'No' }}"
+          - "Version command works: {{ 'Yes' if stow_version.rc == 0 else 'No' }}"
+          - "Functionality test: {{ 'Passed' if stow_test.rc == 0 and stow_symlink_check.stat.islnk else 'Failed' if stow_version.rc == 0 else 'Skipped' }}"
+          - "Package installed: {{ 'Yes' if (dpkg_check.rc == 0 and ansible_os_family == 'Debian') or (rpm_check.rc == 0 and ansible_os_family == 'RedHat') or (pacman_check.rc == 0 and ansible_os_family == 'Archlinux') else 'Unknown/No' }}"

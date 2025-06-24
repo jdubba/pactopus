@@ -5,8 +5,10 @@ PREFIX ?= $(HOME)/.local
 BINDIR = $(PREFIX)/bin
 SHAREDIR = $(PREFIX)/share/pactopus
 SHAREBIN = $(SHAREDIR)/bin
+PLAYBOOKS = $(SHAREDIR)/playbooks
 SRCDIR = src
 USERDIR = $(SRCDIR)/user
+PLAYBOOKDIR = $(SRCDIR)/playbooks
 
 # Main executable
 EXECUTABLE = pactopus
@@ -34,6 +36,7 @@ install: check
 	@echo "Installing pactopus to $(BINDIR)..."
 	@mkdir -p $(BINDIR)
 	@mkdir -p $(SHAREBIN)
+	@mkdir -p $(PLAYBOOKS)
 	@cp $(SRCDIR)/$(EXECUTABLE) $(BINDIR)/$(EXECUTABLE)
 	@chmod +x $(BINDIR)/$(EXECUTABLE)
 	@echo "Installing user scripts to $(SHAREBIN)..."
@@ -46,6 +49,13 @@ install: check
 			ln -sf "$(SHAREBIN)/$$scriptname" "$(BINDIR)/$$scriptname"; \
 		fi; \
 	done
+	@echo "Installing ansible playbooks to $(PLAYBOOKS)..."
+	@if [ -d "$(PLAYBOOKDIR)" ]; then \
+		cp -r "$(PLAYBOOKDIR)"/* "$(PLAYBOOKS)/"; \
+		echo "Playbooks installed successfully"; \
+	else \
+		echo "Warning: No playbooks directory found at $(PLAYBOOKDIR)"; \
+	fi
 	@echo "Installation complete!"
 	@echo "Make sure $(BINDIR) is in your PATH"
 

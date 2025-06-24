@@ -1,0 +1,59 @@
+---
+# Git Detection Test Playbook (no sudo required)
+# Tests OS detection and git checking logic
+
+- name: Test Git Detection Logic
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: no
+  
+  vars:
+    # Package name mappings for different distributions
+    git_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.)
+      Debian: git
+      Ubuntu: git
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: git
+      Fedora: git
+      CentOS: git
+      Rocky: git
+      AlmaLinux: git
+      # Arch family
+      Archlinux: git
+      Manjaro: git
+      # SUSE family
+      openSUSE: git
+      SLES: git
+      # Alpine
+      Alpine: git
+
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Show package name for this distribution
+      debug:
+        msg: "Git package name for {{ ansible_distribution }}: {{ git_packages[ansible_distribution] | default('git') }}"
+        
+    - name: Check if git is already installed
+      command: git --version
+      register: git_version_check
+      failed_when: false
+      changed_when: false
+      
+    - name: Display current git version if installed
+      debug:
+        msg: "Git is already installed: {{ git_version_check.stdout }}"
+      when: git_version_check.rc == 0
+      
+    - name: Show what would be installed
+      debug:
+        msg: "Would install git using {{ ansible_os_family }} family package manager"
+      when: git_version_check.rc != 0
+      
+    - name: Show installation command that would be used
+      debug:
+        msg: "Installation method: {{ 'apt' if ansible_os_family == 'Debian' else 'dnf' if ansible_os_family == 'RedHat' else 'pacman' if ansible_os_family == 'Archlinux' else 'zypper' if ansible_os_family == 'Suse' else 'apk' if ansible_os_family == 'Alpine' else 'unknown' }}"

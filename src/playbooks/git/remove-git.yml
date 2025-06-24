@@ -1,0 +1,219 @@
+---
+# Git Removal Playbook
+# Cross-distribution git removal with safety checks
+# Supports: Debian/Ubuntu, RHEL/Fedora/CentOS, Arch, SUSE, Alpine
+
+- name: Remove Git across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Package name mappings for different distributions
+    git_packages:
+      # Debian family (Ubuntu, Debian, Pop!_OS, etc.)
+      Debian: git
+      Ubuntu: git
+      # Red Hat family (RHEL, Fedora, CentOS, Rocky, Alma)
+      RedHat: git
+      Fedora: git
+      CentOS: git
+      Rocky: git
+      AlmaLinux: git
+      # Arch family
+      Archlinux: git
+      Manjaro: git
+      # SUSE family
+      openSUSE: git
+      SLES: git
+      # Alpine
+      Alpine: git
+    
+    # Additional git-related packages that might be installed
+    additional_git_packages:
+      Debian: ['git-man', 'git-doc']
+      Ubuntu: ['git-man', 'git-doc']
+      RedHat: ['git-core-doc']
+      Fedora: ['git-core-doc']
+      CentOS: ['git-core-doc']
+      Rocky: ['git-core-doc']
+      AlmaLinux: ['git-core-doc']
+      Archlinux: ['git-doc']
+      Manjaro: ['git-doc']
+      openSUSE: ['git-doc']
+      SLES: ['git-doc']
+      Alpine: ['git-doc']
+
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Check if git is currently installed
+      command: git --version
+      register: git_version_check
+      failed_when: false
+      changed_when: false
+      
+    - name: Display current git version if installed
+      debug:
+        msg: "Found git installation: {{ git_version_check.stdout }}"
+      when: git_version_check.rc == 0
+      
+    - name: Skip removal if git not installed
+      debug:
+        msg: "Git is not installed, nothing to remove"
+      when: git_version_check.rc != 0
+      
+    - name: Warning about git removal
+      debug:
+        msg: "WARNING: Removing git will affect any repositories or scripts that depend on it"
+      when: git_version_check.rc == 0
+      
+    - name: Check for git repositories in user directory
+      find:
+        paths: "{{ ansible_env.HOME }}"
+        file_type: directory
+        recurse: yes
+        patterns: ".git"
+        hidden: yes
+      register: git_repos_found
+      when: git_version_check.rc == 0
+      ignore_errors: yes
+      
+    - name: Warning about existing git repositories
+      debug:
+        msg: "WARNING: Found {{ git_repos_found.files | length }} git repositories in your home directory"
+      when: git_version_check.rc == 0 and git_repos_found.files is defined and git_repos_found.files | length > 0
+      
+    - name: List found git repositories
+      debug:
+        msg: "Git repository found at: {{ item.path | dirname }}"
+      loop: "{{ git_repos_found.files | default([]) }}"
+      when: git_version_check.rc == 0 and git_repos_found.files is defined
+      
+    # Remove git packages for each distribution family
+    - name: Remove git (Debian/Ubuntu)
+      apt:
+        name: 
+          - "{{ git_packages[ansible_distribution] | default('git') }}"
+        state: absent
+        autoremove: yes
+      when: ansible_os_family == "Debian" and git_version_check.rc == 0
+      
+    - name: Remove additional git packages (Debian/Ubuntu)
+      apt:
+        name: "{{ additional_git_packages[ansible_distribution] | default([]) }}"
+        state: absent
+        autoremove: yes
+      when: ansible_os_family == "Debian" and git_version_check.rc == 0
+      ignore_errors: yes
+      
+    - name: Remove git (RHEL/Fedora/CentOS)
+      dnf:
+        name: "{{ git_packages[ansible_distribution] | default('git') }}"
+        state: absent
+        autoremove: yes
+      when: ansible_os_family == "RedHat" and git_version_check.rc == 0
+      ignore_errors: yes
+      
+    - name: Remove git (RHEL/CentOS with yum fallback)
+      yum:
+        name: "{{ git_packages[ansible_distribution] | default('git') }}"
+        state: absent
+      when: ansible_os_family == "RedHat" and git_version_check.rc == 0 and ansible_distribution_major_version|int < 8
+      ignore_errors: yes
+      
+    - name: Remove additional git packages (RHEL/Fedora)
+      dnf:
+        name: "{{ additional_git_packages[ansible_distribution] | default([]) }}"
+        state: absent
+        autoremove: yes
+      when: ansible_os_family == "RedHat" and git_version_check.rc == 0
+      ignore_errors: yes
+      
+    - name: Remove git (Arch Linux)
+      pacman:
+        name: "{{ git_packages[ansible_distribution] | default('git') }}"
+        state: absent
+      when: ansible_os_family == "Archlinux" and git_version_check.rc == 0
+      
+    - name: Remove additional git packages (Arch)
+      pacman:
+        name: "{{ additional_git_packages[ansible_distribution] | default([]) }}"
+        state: absent
+      when: ansible_os_family == "Archlinux" and git_version_check.rc == 0
+      ignore_errors: yes
+      
+    - name: Remove git (SUSE)
+      zypper:
+        name: "{{ git_packages[ansible_distribution] | default('git') }}"
+        state: absent
+      when: ansible_os_family == "Suse" and git_version_check.rc == 0
+      
+    - name: Remove additional git packages (SUSE)
+      zypper:
+        name: "{{ additional_git_packages[ansible_distribution] | default([]) }}"
+        state: absent
+      when: ansible_os_family == "Suse" and git_version_check.rc == 0
+      ignore_errors: yes
+      
+    - name: Remove git (Alpine)
+      apk:
+        name: "{{ git_packages[ansible_distribution] | default('git') }}"
+        state: absent
+      when: ansible_os_family == "Alpine" and git_version_check.rc == 0
+      
+    - name: Remove additional git packages (Alpine)
+      apk:
+        name: "{{ additional_git_packages[ansible_distribution] | default([]) }}"
+        state: absent
+      when: ansible_os_family == "Alpine" and git_version_check.rc == 0
+      ignore_errors: yes
+      
+    - name: Verify git removal
+      command: git --version
+      register: git_removal_check
+      failed_when: false
+      changed_when: false
+      when: git_version_check.rc == 0
+      
+    - name: Confirm git removal success
+      debug:
+        msg: "Git has been successfully removed from the system"
+      when: git_version_check.rc == 0 and git_removal_check.rc != 0
+      
+    - name: Warning if git removal failed
+      debug:
+        msg: "WARNING: Git removal may not have been complete. Git is still available: {{ git_removal_check.stdout }}"
+      when: git_version_check.rc == 0 and git_removal_check.rc == 0
+      
+    - name: Clean package cache (Debian/Ubuntu)
+      apt:
+        autoclean: yes
+      when: ansible_os_family == "Debian" and git_version_check.rc == 0
+      ignore_errors: yes
+      
+    - name: Clean package cache (RHEL/Fedora)
+      dnf:
+        autoremove: yes
+      when: ansible_os_family == "RedHat" and git_version_check.rc == 0
+      ignore_errors: yes
+      
+    - name: Clean package cache (Arch)
+      pacman:
+        update_cache: yes
+      when: ansible_os_family == "Archlinux" and git_version_check.rc == 0
+      ignore_errors: yes
+
+  post_tasks:
+    - name: Final cleanup recommendations
+      debug:
+        msg: |
+          Git removal complete. Consider the following:
+          - Your existing git repositories are still intact
+          - You may want to backup important repositories before proceeding
+          - Git configuration files (~/.gitconfig) have not been removed
+          - Some applications may have dependencies on git that could be affected
+      when: git_version_check.rc == 0

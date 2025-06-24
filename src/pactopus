@@ -295,6 +295,74 @@ version() {
     echo "pactopus version ${PACTOPUS_VERSION}"
 }
 
+# Run ansible playbook for package management
+run_ansible_playbook() {
+    local action="$1"
+    shift
+    local packages=("$@")
+    
+    if [[ ${#packages[@]} -eq 0 ]]; then
+        echo "Error: No packages specified" >&2
+        return 1
+    fi
+    
+    # Determine playbook directory location
+    local playbook_dir
+    local inventory_path
+    
+    # First try the installed location
+    if [[ -d "$HOME/.local/share/pactopus/playbooks" ]]; then
+        playbook_dir="$HOME/.local/share/pactopus/playbooks"
+        inventory_path="${playbook_dir}/inventory"
+    else
+        # Fallback to development location
+        local script_dir="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+        playbook_dir="${script_dir}/playbooks"
+        inventory_path="${playbook_dir}/inventory"
+    fi
+    
+    # Ensure ansible is available
+    if ! command -v ansible-playbook >/dev/null 2>&1; then
+        echo "Error: ansible-playbook not found. Run '${SCRIPT_NAME} setup' first." >&2
+        return 1
+    fi
+    
+    # Verify inventory file exists
+    if [[ ! -f "$inventory_path" ]]; then
+        echo "Error: Ansible inventory not found at: ${inventory_path}" >&2
+        return 1
+    fi
+    
+    # Process each package
+    for package in "${packages[@]}"; do
+        local playbook_path="${playbook_dir}/${package}/${action}-${package}.yml"
+        
+        if [[ ! -f "$playbook_path" ]]; then
+            echo "Error: Playbook not found for package '${package}': ${playbook_path}" >&2
+            continue
+        fi
+        
+        echo "Running ${action} playbook for ${package}..."
+        
+        # Run the ansible playbook with sudo password prompt
+        if ansible-playbook -i "$inventory_path" "$playbook_path" --ask-become-pass; then
+            echo "Successfully ${action}ed ${package}"
+        else
+            echo "Error: Failed to ${action} ${package}" >&2
+        fi
+    done
+}
+
+# Install packages using ansible playbooks
+install_packages() {
+    run_ansible_playbook "install" "$@"
+}
+
+# Remove packages using ansible playbooks
+remove_packages() {
+    run_ansible_playbook "remove" "$@"
+}
+
 # Print help information
 help() {
     cat << EOF
@@ -307,6 +375,8 @@ Commands:
     help         Display this help message
     setup        Setup ansible environment and dependencies
     check        Check system requirements and ansible status
+    install      Install one or more packages
+    remove       Remove one or more packages
 
 Options:
     -h, --help   Display help information
@@ -316,6 +386,8 @@ Examples:
     ${SCRIPT_NAME} help
     ${SCRIPT_NAME} setup
     ${SCRIPT_NAME} check
+    ${SCRIPT_NAME} install git curl
+    ${SCRIPT_NAME} remove git
 
 EOF
 }
@@ -346,6 +418,22 @@ main() {
             detect_os
             echo "OS: $OS_ID ($OS_FAMILY) $OS_VERSION"
             check_ansible
+            ;;
+        install)
+            if [[ $# -eq 0 ]]; then
+                echo "Error: No packages specified for installation" >&2
+                echo "Usage: ${SCRIPT_NAME} install <package1> [package2] ..." >&2
+                exit 1
+            fi
+            install_packages "$@"
+            ;;
+        remove)
+            if [[ $# -eq 0 ]]; then
+                echo "Error: No packages specified for removal" >&2
+                echo "Usage: ${SCRIPT_NAME} remove <package1> [package2] ..." >&2
+                exit 1
+            fi
+            remove_packages "$@"
             ;;
         *)
             echo "Error: Unknown command '${command}'" >&2

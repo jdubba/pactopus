@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2025-06-24
+
+### Added
+- New package support for HTTP tools and AI assistance:
+  - `wget` - GNU Wget file downloader with comprehensive HTTP/HTTPS/FTP support
+  - `sudo` - Superuser access control with security configuration guidance
+  - `which` - Command location finder with intelligent provider detection on Debian/Ubuntu
+  - `xh` - HTTPie-compatible HTTP client written in Rust for fast API testing
+  - `yai` - Command-line AI assistant supporting multiple providers (OpenAI, Anthropic, Google, Ollama)
+
+### Enhanced
+- Package management system improvements:
+  - Intelligent sudo validation that only prompts when playbooks actually require elevated privileges
+  - Enhanced provider detection for system packages on Debian/Ubuntu distributions
+  - Better symlink resolution for command location detection
+  - Improved error handling for packages without version flags
+- Cross-distribution installation strategies:
+  - Native package management for rolling distributions (Arch, Fedora)
+  - GitHub binary releases for stable distributions with user-space installation
+  - Automatic cleanup of temporary files during installation
+- User experience improvements:
+  - Comprehensive usage examples and configuration hints for each package
+  - Clear installation method reporting (native package vs binary release)
+  - Enhanced help text with complete package listing
+
+### Fixed
+- Fixed `which` package installation on Pop!_OS and other Debian/Ubuntu derivatives
+- Resolved provider detection issues with symlinked commands managed by alternatives system
+- Improved exit code handling to prevent false failure reports for successful installations
+- Better handling of packages that don't support standard version flags
+
+### Changed
+- Updated package list in CLI help and error messages to include all new packages
+- Enhanced package installation output with better status reporting and troubleshooting information
+
 ## [0.1.3] - 2025-06-23
 
 ### Added

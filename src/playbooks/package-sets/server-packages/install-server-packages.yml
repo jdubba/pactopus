@@ -1,0 +1,167 @@
+---
+# Server Packages Installation Playbook
+# Package set for essential server tools and utilities
+# Based on: docs/pactopus-initial-package-lists.md
+
+- name: Install server packages set
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: no
+  
+  vars:
+    # Define the packages in this set
+    server_packages:
+      - git
+      - gawk
+      - make
+      - curl
+      - stow
+      - fzf
+      - bat
+      - bash-completion
+      - fastfetch
+      - ripgrep
+      - ble
+      - neovim
+      - starship
+      - xh
+      - wget
+      - yai
+      - sudo
+      - which
+    
+    # Package set metadata
+    package_set_name: "server-packages"
+    package_set_description: "Essential server tools and utilities for remote server management"
+    
+  tasks:
+    - name: Display package set information
+      debug:
+        msg:
+          - "Installing package set: {{ package_set_name }}"
+          - "Description: {{ package_set_description }}"
+          - "Packages included: {{ server_packages | length }} packages"
+          - "Package list: {{ server_packages | join(', ') }}"
+
+    - name: Check which packages are already available
+      command: "which {{ item }}"
+      register: package_availability
+      failed_when: false
+      changed_when: false
+      loop: "{{ server_packages }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Display package availability summary
+      debug:
+        msg:
+          - "Package availability check complete:"
+          - "{{ package_availability.results | selectattr('rc', 'equalto', 0) | list | length }} packages already available"
+          - "{{ package_availability.results | selectattr('rc', 'ne', 0) | list | length }} packages need installation"
+
+    - name: Show packages that need installation
+      debug:
+        msg: "Need to install: {{ package_availability.results | selectattr('rc', 'ne', 0) | map(attribute='item') | list | join(', ') }}"
+      when: package_availability.results | selectattr('rc', 'ne', 0) | list | length > 0
+
+    - name: Show packages already available
+      debug:
+        msg: "Already available: {{ package_availability.results | selectattr('rc', 'equalto', 0) | map(attribute='item') | list | join(', ') }}"
+      when: package_availability.results | selectattr('rc', 'equalto', 0) | list | length > 0
+
+    - name: Install individual packages using pactopus
+      shell: |
+        # Use the pactopus command to install each package
+        # This ensures we use the proper package-specific installation logic
+        pactopus install {{ item }}
+      register: package_install_result
+      failed_when: false
+      changed_when: package_install_result.rc == 0
+      loop: "{{ package_availability.results | selectattr('rc', 'ne', 0) | map(attribute='item') | list }}"
+      loop_control:
+        label: "Installing {{ item }}"
+      when: package_availability.results | selectattr('rc', 'ne', 0) | list | length > 0
+
+    - name: Display installation results
+      debug:
+        msg:
+          - "Package installation results:"
+          - "Successful: {{ package_install_result.results | selectattr('rc', 'equalto', 0) | list | length | default(0) }}"
+          - "Failed: {{ package_install_result.results | selectattr('rc', 'ne', 0) | list | length | default(0) }}"
+      when: package_install_result is defined
+
+    - name: Show failed package installations
+      debug:
+        msg:
+          - "Failed to install: {{ item.item }}"
+          - "Error: {{ item.stderr | default('Unknown error') }}"
+      loop: "{{ package_install_result.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: package_install_result is defined and item.rc != 0
+
+    - name: Final verification of package set installation
+      command: "which {{ item }}"
+      register: final_verification
+      failed_when: false
+      changed_when: false
+      loop: "{{ server_packages }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Display final package set status
+      debug:
+        msg:
+          - "{{ package_set_name }} installation complete!"
+          - "Successfully installed: {{ final_verification.results | selectattr('rc', 'equalto', 0) | list | length }}/{{ server_packages | length }} packages"
+          - ""
+          - "Package Set Contents:"
+          - "  Essential Development Tools:"
+          - "    - git: Version control system"
+          - "    - make: Build automation tool"
+          - "    - gawk: Text processing utility"
+          - "  File Management:"
+          - "    - stow: Symlink farm manager for dotfiles"
+          - "    - fzf: Fuzzy finder for command line"
+          - "  Network Tools:"
+          - "    - curl: HTTP client for data transfer"
+          - "    - wget: File downloader"
+          - "    - xh: HTTPie-compatible HTTP client (Rust)"
+          - "  Text Processing:"
+          - "    - bat: Modern cat replacement with syntax highlighting"
+          - "    - ripgrep: Ultra-fast grep alternative"
+          - "  System Tools:"
+          - "    - sudo: Superuser access control"
+          - "    - which: Command location finder"
+          - "  Shell Enhancement:"
+          - "    - bash-completion: Programmable completion for bash"
+          - "    - ble: Bash Line Editor for enhanced shell experience"
+          - "    - starship: Cross-shell prompt customization"
+          - "  System Information:"
+          - "    - fastfetch: System info display tool"
+          - "  Editor:"
+          - "    - neovim: Modern vim-based text editor"
+          - "  AI Assistant:"
+          - "    - yai: Command-line AI tool for multiple providers"
+          - ""
+          - "Usage Examples:"
+          - "  Git workflow: git clone, git status, git commit"
+          - "  File search: fzf, ripgrep pattern"
+          - "  HTTP requests: xh GET api.example.com, curl -X POST"
+          - "  Text viewing: bat filename, cat filename | bat"
+          - "  System info: fastfetch, neofetch alternative"
+          - "  AI assistance: yai ask \"how to use git rebase?\""
+
+    - name: Show missing packages if any
+      debug:
+        msg:
+          - "Warning: Some packages are still missing after installation:"
+          - "{{ final_verification.results | selectattr('rc', 'ne', 0) | map(attribute='item') | list | join(', ') }}"
+          - "You may need to run their installation individually or check for issues."
+      when: final_verification.results | selectattr('rc', 'ne', 0) | list | length > 0
+
+  handlers:
+    - name: refresh package cache
+      package:
+        update_cache: yes

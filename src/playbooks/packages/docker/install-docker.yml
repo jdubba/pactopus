@@ -1,0 +1,270 @@
+---
+# Docker Installation Playbook
+# Cross-distribution Docker installation with official repositories
+# Installs Docker Engine and configures user permissions
+
+- name: Install Docker across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Docker package configurations per distribution
+    docker_packages:
+      # Debian family
+      Debian: docker-ce
+      Ubuntu: docker-ce  
+      "Pop!_OS": docker-ce
+      "Linux Mint": docker-ce
+      elementary: docker-ce
+      # Red Hat family
+      RedHat: docker-ce
+      Fedora: docker-ce
+      CentOS: docker-ce
+      Rocky: docker-ce
+      AlmaLinux: docker-ce
+      # Arch family
+      Archlinux: docker
+      Manjaro: docker
+      # SUSE family
+      openSUSE: docker
+      SLES: docker
+      # Alpine
+      Alpine: docker
+    
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Display installation method
+      debug:
+        msg: "Installation method: Official Docker repository (Docker Engine)"
+
+    - name: Check if docker is already installed
+      command: docker --version
+      register: docker_version_check
+      failed_when: false
+      changed_when: false
+
+    - name: Display current docker version if installed
+      debug:
+        msg: "Docker is already installed: {{ docker_version_check.stdout }}"
+      when: docker_version_check.rc == 0
+
+    # Debian/Ubuntu installation
+    - name: Install Docker on Debian/Ubuntu
+      block:
+        - name: Update package cache
+          apt:
+            update_cache: yes
+
+        - name: Install prerequisites
+          apt:
+            name:
+              - apt-transport-https
+              - ca-certificates
+              - curl
+              - gnupg
+              - lsb-release
+            state: present
+
+        - name: Add Docker GPG key
+          apt_key:
+            url: https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg
+            state: present
+
+        - name: Add Docker repository
+          apt_repository:
+            repo: "deb https://download.docker.com/linux/{{ ansible_distribution | lower }} {{ ansible_distribution_release }} stable"
+            state: present
+            update_cache: yes
+
+        - name: Install Docker Engine
+          apt:
+            name:
+              - docker-ce
+              - docker-ce-cli
+              - containerd.io
+              - docker-buildx-plugin
+              - docker-compose-plugin
+            state: latest
+
+      when: ansible_os_family == "Debian"
+
+    # RedHat/Fedora installation
+    - name: Install Docker on RedHat/Fedora
+      block:
+        - name: Install prerequisites (Fedora)
+          dnf:
+            name:
+              - dnf-plugins-core
+            state: present
+          when: ansible_distribution == "Fedora"
+
+        - name: Add Docker repository (Fedora)
+          shell: |
+            dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+          when: ansible_distribution == "Fedora"
+
+        - name: Install Docker Engine (Fedora)
+          dnf:
+            name:
+              - docker-ce
+              - docker-ce-cli
+              - containerd.io
+              - docker-buildx-plugin
+              - docker-compose-plugin
+            state: latest
+          when: ansible_distribution == "Fedora"
+
+        - name: Add Docker repository (RHEL-based)
+          shell: |
+            yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+          when: ansible_distribution in ["RedHat", "CentOS", "Rocky", "AlmaLinux"]
+
+        - name: Install Docker Engine (RHEL-based)
+          dnf:
+            name:
+              - docker-ce
+              - docker-ce-cli
+              - containerd.io
+              - docker-buildx-plugin
+              - docker-compose-plugin
+            state: latest
+          when: ansible_distribution in ["RedHat", "CentOS", "Rocky", "AlmaLinux"]
+
+      when: ansible_os_family == "RedHat"
+
+    # Arch Linux installation
+    - name: Install Docker on Arch Linux
+      pacman:
+        name:
+          - docker
+          - docker-compose
+        state: latest
+      when: ansible_os_family == "Archlinux"
+
+    # SUSE installation
+    - name: Install Docker on SUSE
+      zypper:
+        name:
+          - docker
+          - docker-compose
+        state: latest
+      when: ansible_os_family == "Suse"
+
+    # Alpine installation
+    - name: Install Docker on Alpine
+      apk:
+        name:
+          - docker
+          - docker-compose
+        state: latest
+      when: ansible_os_family == "Alpine"
+
+    # Post-installation configuration
+    - name: Start and enable Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Create docker group
+      group:
+        name: docker
+        state: present
+
+    - name: Add current user to docker group
+      user:
+        name: "{{ ansible_env.USER }}"
+        groups: docker
+        append: yes
+      become: no
+      when: ansible_env.USER is defined
+
+    - name: Verify Docker installation
+      command: docker --version
+      register: docker_final_version
+      changed_when: false
+
+    - name: Display final Docker version
+      debug:
+        msg: "Docker installation complete: {{ docker_final_version.stdout }}"
+
+    - name: Check Docker service status
+      shell: systemctl is-active docker
+      register: docker_service_status
+      changed_when: false
+
+    - name: Check Docker Compose availability
+      command: docker compose version
+      register: docker_compose_check
+      failed_when: false
+      changed_when: false
+
+    - name: Test Docker functionality (rootless)
+      shell: docker run --rm hello-world
+      register: docker_test
+      failed_when: false
+      changed_when: false
+      become: no
+
+    - name: Display Docker usage and configuration hints
+      debug:
+        msg:
+          - "Docker installation complete!"
+          - "Usage: docker [command] [options]            # Docker CLI"
+          - "       docker run image                       # Run container"
+          - "       docker ps                              # List running containers"
+          - "       docker images                          # List images"
+          - "       docker --help                          # Show help"
+          - ""
+          - "Common Docker Commands:"
+          - "  docker run -it ubuntu bash                  # Run interactive Ubuntu container"
+          - "  docker run -d -p 80:80 nginx               # Run nginx in background, port 80"
+          - "  docker ps                                   # List running containers"
+          - "  docker ps -a                               # List all containers"
+          - "  docker images                              # List downloaded images"
+          - "  docker pull image:tag                      # Download image"
+          - "  docker build -t myapp .                    # Build image from Dockerfile"
+          - "  docker stop container_id                   # Stop container"
+          - "  docker rm container_id                     # Remove container"
+          - "  docker rmi image_id                        # Remove image"
+          - ""
+          - "Docker Compose Commands:"
+          - "  docker compose up                          # Start services from docker-compose.yml"
+          - "  docker compose up -d                       # Start services in background"
+          - "  docker compose down                        # Stop and remove services"
+          - "  docker compose logs                        # View service logs"
+          - "  docker compose ps                          # List services"
+          - ""
+          - "System Information:"
+          - "  Service status: {{ docker_service_status.stdout }}"
+          - "  Docker Compose: {{ 'Available' if docker_compose_check.rc == 0 else 'Not available' }}"
+          - "  User group: {{ ansible_env.USER }} added to docker group"
+          - "  Rootless test: {{ 'Passed' if docker_test.rc == 0 else 'Failed (may need logout/login)' }}"
+          - ""
+          - "Installation details:"
+          - "  Method: Official Docker repository"
+          - "  Version: {{ docker_final_version.stdout }}"
+          - "  Service: Enabled and started"
+          - "  Compose version: {{ docker_compose_check.stdout if docker_compose_check.rc == 0 else 'N/A' }}"
+          - ""
+          - "Next steps:"
+          - "  1. Log out and log back in to use Docker without sudo"
+          - "  2. Test: docker run hello-world"
+          - "  3. Create Dockerfile for your applications"
+          - "  4. Consider setting up Docker registry authentication"
+          - ""
+          - "Security Notes:"
+          - "  - Docker daemon runs as root (normal behavior)"
+          - "  - Users in docker group have root-equivalent access"
+          - "  - Be cautious with untrusted images and containers"
+          - "  - Consider using Docker rootless mode for enhanced security"
+
+  handlers:
+    - name: refresh package cache
+      package:
+        update_cache: yes

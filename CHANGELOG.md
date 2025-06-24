@@ -5,6 +5,60 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2025-06-24
+
+### Added
+- **Package Sets System**: Revolutionary composable package management
+  - New `src/playbooks/package-sets/` directory structure
+  - `server-packages` set with 18 essential server tools
+  - Intelligent deduplication logic prevents duplicate installations
+  - Unified `install` and `remove` commands work with both packages and package sets
+  - Automatic package set content parsing and classification
+
+- **Major Development Package Expansion**: 13+ new development packages
+  - **Build Tools**: `autoconf` - GNU Autotools configure script generator with comprehensive cross-distribution support
+  - **Compilers**: `gcc` - GNU Compiler Collection with compilation testing and optimization guidance
+  - **Programming Languages**: 
+    - `python3` - Python 3 with pip, venv, and development headers across all distributions
+    - `nodejs` - Node.js with LTS preference via NodeSource for stable distributions
+    - `nvm` - Node Version Manager with shell integration and version management
+  - **Cloud Tools**: `aws-cli` - AWS CLI v2 using official installer with security best practices
+  - **Containerization**: `docker` - Docker Engine with official repositories, user group configuration, and service management
+
+### Enhanced
+- **Unified Command Interface**: Single install/remove commands handle both packages and package sets seamlessly
+  - `pactopus install server-packages git` - Installs set and deduplicates individual packages
+  - Intelligent classification system automatically detects package vs package set
+  - Clear user feedback about deduplication decisions
+- **Advanced Installation Strategies**:
+  - **Distribution-aware logic**: Rolling distributions use native packages, stable use official sources
+  - **Repository management**: Automatic addition of official repositories (Docker, NodeSource)
+  - **User-space installations**: NVM, AWS CLI install to user directories without sudo
+  - **Service configuration**: Docker automatically starts service and adds user to docker group
+- **Comprehensive Package Documentation**: Each package includes detailed usage examples, security notes, and next steps
+- **Enhanced Help System**: Categorized package listing (Development Tools, System Tools, Cloud & Containers)
+
+### Refactored
+- **Directory Structure Reorganization**:
+  - Moved all individual packages from `src/playbooks/{package}/` to `src/playbooks/packages/{package}/`
+  - Added `src/playbooks/package-sets/` for composable package collections
+  - Updated CLI path resolution and Makefile installation to handle new structure
+- **Package Set Architecture**:
+  - Extensible YAML-based package set definitions with metadata
+  - Content extraction system for deduplication analysis
+  - Separate execution pipelines for packages vs package sets
+
+### Fixed
+- **Shell Compatibility**: Fixed NVM installation to use bash instead of sh for `source` command
+- **YAML Syntax**: Resolved f-string syntax issues in Python3 playbook shell commands
+- **Path Resolution**: Updated all playbook path detection to work with new directory structure
+
+### Technical Improvements
+- **Sophisticated Deduplication Algorithm**: Prevents installing individual packages already included in package sets
+- **Mixed Installation Strategies**: Handles combinations of native packages, official installers, and user-space tools
+- **Enhanced Error Handling**: Better validation for missing dependencies (curl, unzip) and graceful fallbacks
+- **Cross-Distribution Package Mapping**: Comprehensive package name variations across Linux distributions
+
 ## [0.1.4] - 2025-06-24
 
 ### Added

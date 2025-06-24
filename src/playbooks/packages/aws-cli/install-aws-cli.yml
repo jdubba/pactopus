@@ -1,0 +1,182 @@
+---
+# AWS CLI Installation Playbook
+# Cross-distribution AWS CLI v2 installation
+# Prefers official AWS installer for latest features and security
+
+- name: Install AWS CLI across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: no
+  
+  vars:
+    # Installation strategy: prefer official AWS installer
+    aws_cli_installer_url: "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip"
+    aws_cli_install_dir: "{{ ansible_env.HOME }}/.local/aws-cli"
+    aws_cli_bin_dir: "{{ ansible_env.HOME }}/.local/bin"
+    
+    # Package names for distributions that have aws-cli packages
+    aws_cli_packages:
+      # Some distributions package AWS CLI
+      Debian: awscli
+      Ubuntu: awscli
+      "Pop!_OS": awscli
+      Fedora: awscli2
+      Archlinux: aws-cli-v2
+      Manjaro: aws-cli-v2
+    
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Display installation method
+      debug:
+        msg: "Installation method: Official AWS installer (AWS CLI v2)"
+
+    - name: Check if AWS CLI is already installed
+      command: aws --version
+      register: aws_version_check
+      failed_when: false
+      changed_when: false
+
+    - name: Display current AWS CLI version if installed
+      debug:
+        msg: "AWS CLI is already installed: {{ aws_version_check.stdout }}"
+      when: aws_version_check.rc == 0
+
+    - name: Check for required tools
+      command: "{{ item }}"
+      register: tool_checks
+      failed_when: false
+      changed_when: false
+      loop:
+        - "which curl"
+        - "which unzip"
+
+    - name: Display tool availability
+      debug:
+        msg:
+          - "Curl: {{ 'Available' if tool_checks.results[0].rc == 0 else 'Missing - required for download' }}"
+          - "Unzip: {{ 'Available' if tool_checks.results[1].rc == 0 else 'Missing - required for extraction' }}"
+
+    - name: Create installation directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ aws_cli_install_dir }}"
+        - "{{ aws_cli_bin_dir }}"
+
+    - name: Download AWS CLI installer
+      get_url:
+        url: "{{ aws_cli_installer_url }}"
+        dest: "/tmp/awscliv2.zip"
+        mode: '0644'
+      when: tool_checks.results[0].rc == 0 and tool_checks.results[1].rc == 0
+      register: aws_download
+
+    - name: Extract AWS CLI installer
+      unarchive:
+        src: "/tmp/awscliv2.zip"
+        dest: "/tmp"
+        remote_src: yes
+      when: aws_download.changed
+      register: aws_extract
+
+    - name: Install AWS CLI to user directory
+      shell: |
+        /tmp/aws/install -i "{{ aws_cli_install_dir }}" -b "{{ aws_cli_bin_dir }}" --update
+      when: aws_extract.changed
+      register: aws_install
+
+    - name: Clean up downloaded files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "/tmp/awscliv2.zip"
+        - "/tmp/aws"
+      when: aws_download.changed
+
+    - name: Verify AWS CLI installation
+      command: aws --version
+      register: aws_final_version
+      changed_when: false
+
+    - name: Display final AWS CLI version
+      debug:
+        msg: "AWS CLI installation complete: {{ aws_final_version.stdout }}"
+
+    - name: Check AWS CLI binary location
+      shell: which aws
+      register: aws_path
+      changed_when: false
+
+    - name: Display AWS CLI binary location
+      debug:
+        msg: "AWS CLI binary location: {{ aws_path.stdout }}"
+
+    - name: Check AWS configuration status
+      stat:
+        path: "{{ ansible_env.HOME }}/.aws/config"
+      register: aws_config_check
+
+    - name: Check AWS credentials status
+      stat:
+        path: "{{ ansible_env.HOME }}/.aws/credentials"
+      register: aws_credentials_check
+
+    - name: Display AWS CLI usage and configuration hints
+      debug:
+        msg:
+          - "AWS CLI installation complete!"
+          - "Usage: aws [service] [operation] [options]    # AWS command structure"
+          - "       aws help                               # Show help"
+          - "       aws configure                          # Configure credentials"
+          - "       aws sts get-caller-identity            # Verify authentication"
+          - ""
+          - "Initial Configuration:"
+          - "  aws configure                               # Interactive setup"
+          - "  aws configure list                          # Show current configuration"
+          - "  aws configure set region us-east-1          # Set default region"
+          - "  aws configure set output json               # Set output format"
+          - ""
+          - "Common AWS Services:"
+          - "  aws s3 ls                                   # List S3 buckets"
+          - "  aws ec2 describe-instances                  # List EC2 instances"
+          - "  aws iam list-users                          # List IAM users"
+          - "  aws logs describe-log-groups                # List CloudWatch log groups"
+          - "  aws lambda list-functions                   # List Lambda functions"
+          - ""
+          - "Authentication Methods:"
+          - "  1. AWS CLI configure (stores in ~/.aws/)"
+          - "  2. Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)"
+          - "  3. IAM roles (for EC2 instances)"
+          - "  4. AWS SSO (aws sso login)"
+          - ""
+          - "Configuration Files:"
+          - "  ~/.aws/config                               # {{ 'Exists' if aws_config_check.stat.exists else 'Not configured' }}"
+          - "  ~/.aws/credentials                          # {{ 'Exists' if aws_credentials_check.stat.exists else 'Not configured' }}"
+          - ""
+          - "Installation details:"
+          - "  Method: Official AWS installer (v2)"
+          - "  Version: {{ aws_final_version.stdout }}"
+          - "  Binary: {{ aws_path.stdout }}"
+          - "  Installation directory: {{ aws_cli_install_dir }}"
+          - ""
+          - "Next steps:"
+          - "  1. Run 'aws configure' to set up credentials"
+          - "  2. Test with 'aws sts get-caller-identity'"
+          - "  3. Set up CLI profiles if using multiple accounts"
+          - "  4. Consider enabling CLI auto-completion"
+          - ""
+          - "Security Note:"
+          - "  Never commit AWS credentials to version control"
+          - "  Use IAM roles when possible instead of long-term keys"
+
+  handlers:
+    - name: refresh package cache
+      package:
+        update_cache: yes

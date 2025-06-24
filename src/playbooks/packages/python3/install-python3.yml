@@ -1,0 +1,248 @@
+---
+# Python3 Installation Playbook
+# Cross-distribution Python3 installation with pip and development headers
+# Installs Python3, pip, and essential development packages
+
+- name: Install Python3 across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Package name mappings for different distributions
+    python3_packages:
+      # Debian family
+      Debian: 
+        - python3
+        - python3-pip
+        - python3-venv
+        - python3-dev
+      Ubuntu:
+        - python3
+        - python3-pip
+        - python3-venv
+        - python3-dev
+      "Pop!_OS":
+        - python3
+        - python3-pip
+        - python3-venv
+        - python3-dev
+      "Linux Mint":
+        - python3
+        - python3-pip
+        - python3-venv
+        - python3-dev
+      elementary:
+        - python3
+        - python3-pip
+        - python3-venv
+        - python3-dev
+      # Red Hat family
+      RedHat:
+        - python3
+        - python3-pip
+        - python3-devel
+      Fedora:
+        - python3
+        - python3-pip
+        - python3-devel
+      CentOS:
+        - python3
+        - python3-pip
+        - python3-devel
+      Rocky:
+        - python3
+        - python3-pip
+        - python3-devel
+      AlmaLinux:
+        - python3
+        - python3-pip
+        - python3-devel
+      # Arch family
+      Archlinux:
+        - python
+        - python-pip
+      Manjaro:
+        - python
+        - python-pip
+      # SUSE family
+      openSUSE:
+        - python3
+        - python3-pip
+        - python3-devel
+      SLES:
+        - python3
+        - python3-pip
+        - python3-devel
+      # Alpine
+      Alpine:
+        - python3
+        - py3-pip
+        - python3-dev
+    
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Show packages for this distribution
+      debug:
+        msg: "Python3 packages for {{ ansible_distribution }}: {{ python3_packages[ansible_distribution] | default(['python3', 'python3-pip']) | join(', ') }}"
+
+    - name: Check if python3 is already installed
+      command: python3 --version
+      register: python3_version_check
+      failed_when: false
+      changed_when: false
+
+    - name: Display current python3 version if installed
+      debug:
+        msg: "Python3 is already installed: {{ python3_version_check.stdout }}"
+      when: python3_version_check.rc == 0
+
+    - name: Check if pip3 is available
+      command: pip3 --version
+      register: pip3_version_check
+      failed_when: false
+      changed_when: false
+
+    - name: Display current pip3 version if installed
+      debug:
+        msg: "Pip3 is available: {{ pip3_version_check.stdout }}"
+      when: pip3_version_check.rc == 0
+
+    - name: Update package cache
+      package:
+        update_cache: yes
+
+    - name: Install Python3 packages (Debian/Ubuntu)
+      apt:
+        name: "{{ python3_packages[ansible_distribution] | default(['python3', 'python3-pip', 'python3-venv', 'python3-dev']) }}"
+        state: latest
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Install Python3 packages (RedHat/Fedora)
+      dnf:
+        name: "{{ python3_packages[ansible_distribution] | default(['python3', 'python3-pip', 'python3-devel']) }}"
+        state: latest
+      when: ansible_os_family == "RedHat"
+
+    - name: Install Python3 packages (Arch Linux)
+      pacman:
+        name: "{{ python3_packages[ansible_distribution] | default(['python', 'python-pip']) }}"
+        state: latest
+      when: ansible_os_family == "Archlinux"
+
+    - name: Install Python3 packages (SUSE)
+      zypper:
+        name: "{{ python3_packages[ansible_distribution] | default(['python3', 'python3-pip', 'python3-devel']) }}"
+        state: latest
+      when: ansible_os_family == "Suse"
+
+    - name: Install Python3 packages (Alpine)
+      apk:
+        name: "{{ python3_packages[ansible_distribution] | default(['python3', 'py3-pip', 'python3-dev']) }}"
+        state: latest
+      when: ansible_os_family == "Alpine"
+
+    - name: Verify Python3 installation
+      command: python3 --version
+      register: python3_final_version
+      changed_when: false
+
+    - name: Verify pip3 installation
+      command: pip3 --version
+      register: pip3_final_version
+      changed_when: false
+
+    - name: Display final versions
+      debug:
+        msg: 
+          - "Python3 installation complete: {{ python3_final_version.stdout }}"
+          - "Pip3 version: {{ pip3_final_version.stdout }}"
+
+    - name: Check Python3 binary location
+      shell: which python3
+      register: python3_path
+      changed_when: false
+
+    - name: Check pip3 binary location
+      shell: which pip3
+      register: pip3_path
+      changed_when: false
+
+    - name: Display binary locations
+      debug:
+        msg:
+          - "Python3 binary: {{ python3_path.stdout }}"
+          - "Pip3 binary: {{ pip3_path.stdout }}"
+
+    - name: Test Python3 functionality
+      shell: python3 -c "print('Python3 is working'); import sys; print('Version: ' + sys.version)"
+      register: python3_functionality_test
+      changed_when: false
+
+    - name: Test virtual environment support
+      shell: python3 -m venv --help
+      register: venv_test
+      failed_when: false
+      changed_when: false
+
+    - name: Display Python3 usage hints
+      debug:
+        msg:
+          - "Python3 installation complete!"
+          - "Usage: python3 [script.py]                   # Run Python script"
+          - "       python3 -c 'code'                     # Execute Python code"
+          - "       pip3 install package                  # Install package"
+          - "       python3 -m venv env                   # Create virtual environment"
+          - ""
+          - "Common Python Commands:"
+          - "  python3 --version                          # Show Python version"
+          - "  python3 -c 'print(\"Hello World\")'        # Execute inline code"
+          - "  python3 script.py                          # Run Python script"
+          - "  python3 -m pip install --upgrade pip       # Upgrade pip"
+          - "  python3 -i script.py                       # Run script then enter interactive mode"
+          - ""
+          - "Pip Package Management:"
+          - "  pip3 install package                       # Install package"
+          - "  pip3 install package==1.0.0                # Install specific version"
+          - "  pip3 install -r requirements.txt           # Install from requirements file"
+          - "  pip3 list                                  # List installed packages"
+          - "  pip3 show package                          # Show package info"
+          - "  pip3 uninstall package                     # Remove package"
+          - "  pip3 freeze > requirements.txt             # Export installed packages"
+          - ""
+          - "Virtual Environment Management:"
+          - "  python3 -m venv myenv                      # Create virtual environment"
+          - "  source myenv/bin/activate                  # Activate environment (Linux/Mac)"
+          - "  deactivate                                 # Deactivate environment"
+          - "  pip install package                        # Install in active environment"
+          - ""
+          - "Development Examples:"
+          - "  python3 -m http.server 8000                # Start simple HTTP server"
+          - "  python3 -m json.tool file.json             # Pretty-print JSON"
+          - "  python3 -m timeit 'code'                   # Time code execution"
+          - "  python3 -m pdb script.py                   # Debug script"
+          - ""
+          - "Installation details:"
+          - "  Method: Native package manager"
+          - "  Python3 version: {{ python3_final_version.stdout }}"
+          - "  Pip3 version: {{ pip3_final_version.stdout }}"
+          - "  Python3 binary: {{ python3_path.stdout }}"
+          - "  Pip3 binary: {{ pip3_path.stdout }}"
+          - "  Virtual env support: {{ 'Available' if venv_test.rc == 0 else 'Not available' }}"
+          - "  Test result: {{ python3_functionality_test.stdout_lines[0] }}"
+          - ""
+          - "Next steps:"
+          - "  1. Create virtual environment for projects"
+          - "  2. Upgrade pip: python3 -m pip install --upgrade pip"
+          - "  3. Install development tools: pip3 install pytest black flake8"
+          - "  4. Consider installing pipx for global tools"
+
+  handlers:
+    - name: refresh package cache
+      package:
+        update_cache: yes

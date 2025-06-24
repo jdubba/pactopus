@@ -1,0 +1,153 @@
+---
+# NVM Installation Playbook  
+# Cross-distribution NVM (Node Version Manager) installation
+# NVM allows managing multiple Node.js versions
+
+- name: Install NVM across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: no
+  
+  vars:
+    nvm_version: "v0.39.7"
+    nvm_install_script: "https://raw.githubusercontent.com/nvm-sh/nvm/{{ nvm_version }}/install.sh"
+    nvm_dir: "{{ ansible_env.HOME }}/.nvm"
+    
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Display installation method
+      debug:
+        msg: "Installation method: Official install script to ~/.nvm"
+
+    - name: Check if NVM is already installed
+      shell: |
+        if [ -s "{{ nvm_dir }}/nvm.sh" ]; then
+          source "{{ nvm_dir }}/nvm.sh"
+          nvm --version 2>/dev/null || echo "nvm_not_working"
+        else
+          echo "nvm_not_installed"
+        fi
+      register: nvm_version_check
+      failed_when: false
+      changed_when: false
+
+    - name: Display current NVM version if installed
+      debug:
+        msg: "NVM is already installed: {{ nvm_version_check.stdout }}"
+      when: nvm_version_check.stdout != "nvm_not_installed" and nvm_version_check.stdout != "nvm_not_working"
+
+    - name: Check if curl is available
+      command: which curl
+      register: curl_check
+      failed_when: false
+      changed_when: false
+
+    - name: Display curl availability
+      debug:
+        msg: "Curl: {{ 'Available' if curl_check.rc == 0 else 'Not available - required for NVM installation' }}"
+
+    - name: Download and install NVM
+      shell: |
+        curl -o- {{ nvm_install_script }} | bash
+      when: curl_check.rc == 0 and (nvm_version_check.stdout == "nvm_not_installed" or nvm_version_check.stdout == "nvm_not_working")
+      register: nvm_install_result
+
+    - name: Display curl installation error
+      debug:
+        msg: 
+          - "ERROR: curl command not found"
+          - "NVM requires curl for installation"
+          - "Please install curl first: pactopus install curl"
+      when: curl_check.rc != 0
+
+    - name: Verify NVM installation
+      shell: |
+        source "{{ nvm_dir }}/nvm.sh"
+        nvm --version
+      args:
+        executable: /bin/bash
+      register: nvm_final_version
+      changed_when: false
+
+    - name: Display final NVM version
+      debug:
+        msg: "NVM installation complete: {{ nvm_final_version.stdout }}"
+
+    - name: Check available Node.js versions
+      shell: |
+        source "{{ nvm_dir }}/nvm.sh"
+        nvm list-remote --lts | tail -5
+      args:
+        executable: /bin/bash
+      register: nvm_available_versions
+      changed_when: false
+      failed_when: false
+
+    - name: Check shell integration status
+      shell: |
+        for file in ~/.bashrc ~/.zshrc ~/.profile; do
+          if [ -f "$file" ] && grep -q "nvm.sh" "$file"; then
+            echo "$(basename $file): configured"
+          elif [ -f "$file" ]; then
+            echo "$(basename $file): not_configured"
+          fi
+        done
+      register: shell_integration_check
+      changed_when: false
+
+    - name: Display shell integration status
+      debug:
+        msg: "Shell integration: {{ shell_integration_check.stdout_lines | join(', ') }}"
+
+    - name: Display NVM usage and configuration hints
+      debug:
+        msg:
+          - "NVM installation complete!"
+          - "Usage: nvm [command]                         # Node Version Manager"
+          - "       nvm install node                      # Install latest Node.js"
+          - "       nvm install --lts                     # Install latest LTS Node.js"
+          - "       nvm use node                          # Use latest installed version"
+          - "       nvm --help                            # Show help"
+          - ""
+          - "Common NVM Commands:"
+          - "  nvm list-remote                            # Show available versions"
+          - "  nvm list-remote --lts                      # Show LTS versions only"
+          - "  nvm install 18.19.0                       # Install specific version"
+          - "  nvm install --lts=hydrogen                 # Install specific LTS release"
+          - "  nvm use 18.19.0                           # Switch to specific version"
+          - "  nvm current                                # Show current version"
+          - "  nvm list                                   # Show installed versions"
+          - "  nvm alias default 18.19.0                 # Set default version"
+          - "  nvm uninstall 16.20.0                     # Remove version"
+          - ""
+          - "Version Management Examples:"
+          - "  nvm install --lts && nvm use --lts         # Install and use latest LTS"
+          - "  nvm install node && nvm alias default node # Install latest and set as default"
+          - "  echo '18.19.0' > .nvmrc && nvm use         # Use version from .nvmrc file"
+          - ""
+          - "Installation details:"
+          - "  Method: Official install script"
+          - "  Version: {{ nvm_final_version.stdout }}"
+          - "  Installation directory: {{ nvm_dir }}"
+          - "  Shell integration: {{ shell_integration_check.stdout_lines | join(', ') }}"
+          - ""
+          - "Available LTS versions (latest 5):"
+          - "{{ nvm_available_versions.stdout_lines | default(['Run nvm list-remote --lts to see versions']) | join('\\n') }}"
+          - ""
+          - "Next steps:"
+          - "  1. Restart your terminal or run: source ~/.bashrc"
+          - "  2. Install Node.js LTS: nvm install --lts"
+          - "  3. Set default version: nvm alias default --lts"
+          - "  4. Verify: node --version && npm --version"
+          - ""
+          - "Note: NVM modifies your shell profile automatically"
+          - "Use 'nvm use system' to switch back to system Node.js"
+
+  handlers:
+    - name: refresh package cache
+      package:
+        update_cache: yes

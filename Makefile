@@ -14,7 +14,7 @@ PLAYBOOKDIR = $(SRCDIR)/playbooks
 EXECUTABLE = pactopus
 
 # Version
-VERSION = 0.1.3
+VERSION = 0.1.5
 
 # Default target
 all: check

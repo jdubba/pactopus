@@ -1,0 +1,247 @@
+---
+# Node.js Installation Playbook
+# Cross-distribution Node.js installation with LTS preference
+# Uses NodeSource repository for stable distributions, native packages for rolling
+
+- name: Install Node.js across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Package name mappings for different distributions
+    nodejs_packages:
+      # Debian family
+      Debian: nodejs
+      Ubuntu: nodejs
+      "Pop!_OS": nodejs
+      "Linux Mint": nodejs
+      elementary: nodejs
+      # Red Hat family
+      RedHat: nodejs
+      Fedora: nodejs
+      CentOS: nodejs
+      Rocky: nodejs
+      AlmaLinux: nodejs
+      # Arch family
+      Archlinux: nodejs
+      Manjaro: nodejs
+      # SUSE family
+      openSUSE: nodejs20
+      SLES: nodejs20
+      # Alpine
+      Alpine: nodejs
+    
+    # Rolling distributions (use native packages)
+    rolling_distributions:
+      - Archlinux
+      - Manjaro
+      - Fedora
+      - openSUSE Tumbleweed
+    
+    # Stable distributions (prefer NodeSource LTS)
+    stable_distributions:
+      - Debian
+      - Ubuntu
+      - "Pop!_OS"
+      - "Linux Mint"
+      - elementary
+      - RedHat
+      - CentOS
+      - Rocky
+      - AlmaLinux
+      - Alpine
+    
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Determine installation strategy
+      set_fact:
+        is_rolling_distribution: "{{ ansible_distribution in rolling_distributions }}"
+        is_stable_distribution: "{{ ansible_distribution in stable_distributions }}"
+
+    - name: Display installation method
+      debug:
+        msg: 
+          - "Distribution type: {{ 'Rolling' if is_rolling_distribution else 'Stable' }}"
+          - "Installation method: {{ 'Native package' if is_rolling_distribution else 'NodeSource LTS repository' }}"
+
+    - name: Check if node is already installed
+      command: node --version
+      register: nodejs_version_check
+      failed_when: false
+      changed_when: false
+
+    - name: Display current node version if installed
+      debug:
+        msg: "Node.js is already installed: {{ nodejs_version_check.stdout }}"
+      when: nodejs_version_check.rc == 0
+
+    - name: Check if npm is available
+      command: npm --version
+      register: npm_version_check
+      failed_when: false
+      changed_when: false
+
+    - name: Display current npm version if installed
+      debug:
+        msg: "NPM is available: {{ npm_version_check.stdout }}"
+      when: npm_version_check.rc == 0
+
+    # Rolling distribution installation (native packages)
+    - name: Install Node.js via native package manager (Rolling distributions)
+      block:
+        - name: Install nodejs (Arch Linux)
+          pacman:
+            name: 
+              - "{{ nodejs_packages[ansible_distribution] | default('nodejs') }}"
+              - npm
+            state: latest
+          when: ansible_os_family == "Archlinux"
+
+        - name: Install nodejs (Fedora)
+          dnf:
+            name: 
+              - "{{ nodejs_packages[ansible_distribution] | default('nodejs') }}"
+              - npm
+            state: latest
+          when: ansible_os_family == "RedHat" and ansible_distribution == "Fedora"
+
+        - name: Install nodejs (openSUSE)
+          zypper:
+            name: 
+              - "{{ nodejs_packages[ansible_distribution] | default('nodejs20') }}"
+              - npm20
+            state: latest
+          when: ansible_os_family == "Suse"
+
+      when: is_rolling_distribution
+
+    # Stable distribution installation (NodeSource LTS)
+    - name: Install Node.js via NodeSource LTS (Stable distributions)
+      block:
+        - name: Add NodeSource signing key (Debian/Ubuntu)
+          apt_key:
+            url: https://deb.nodesource.com/gpgkey/nodesource.gpg.key
+            state: present
+          when: ansible_os_family == "Debian"
+
+        - name: Add NodeSource LTS repository (Debian/Ubuntu)
+          apt_repository:
+            repo: "deb https://deb.nodesource.com/node_lts.x {{ ansible_distribution_release }} main"
+            state: present
+            update_cache: yes
+          when: ansible_os_family == "Debian"
+
+        - name: Install Node.js LTS (Debian/Ubuntu)
+          apt:
+            name: nodejs
+            state: latest
+            update_cache: yes
+          when: ansible_os_family == "Debian"
+
+        - name: Add NodeSource repository (RedHat family)
+          shell: |
+            curl -fsSL https://rpm.nodesource.com/setup_lts.x | bash -
+          when: ansible_os_family == "RedHat" and ansible_distribution != "Fedora"
+          register: nodesource_setup
+          changed_when: true
+
+        - name: Install Node.js LTS (RedHat family)
+          dnf:
+            name: nodejs
+            state: latest
+          when: ansible_os_family == "RedHat" and ansible_distribution != "Fedora"
+
+        - name: Install Node.js (Alpine)
+          apk:
+            name: 
+              - nodejs
+              - npm
+            state: latest
+          when: ansible_os_family == "Alpine"
+
+      when: is_stable_distribution
+
+    - name: Verify Node.js installation
+      command: node --version
+      register: nodejs_final_version
+      changed_when: false
+
+    - name: Verify NPM installation  
+      command: npm --version
+      register: npm_final_version
+      changed_when: false
+
+    - name: Display final versions
+      debug:
+        msg: 
+          - "Node.js installation complete: {{ nodejs_final_version.stdout }}"
+          - "NPM version: {{ npm_final_version.stdout }}"
+
+    - name: Check Node.js binary location
+      shell: which node
+      register: nodejs_path
+      changed_when: false
+
+    - name: Check NPM binary location
+      shell: which npm
+      register: npm_path
+      changed_when: false
+
+    - name: Display binary locations
+      debug:
+        msg:
+          - "Node.js binary: {{ nodejs_path.stdout }}"
+          - "NPM binary: {{ npm_path.stdout }}"
+
+    - name: Test Node.js functionality
+      shell: node -e "console.log('Node.js is working')"
+      register: nodejs_functionality_test
+      changed_when: false
+
+    - name: Display Node.js usage hints
+      debug:
+        msg:
+          - "Node.js installation complete!"
+          - "Usage: node [script.js]                      # Run JavaScript file"
+          - "       node -e 'code'                        # Execute JavaScript code"
+          - "       npm install package                    # Install package locally"
+          - "       npm install -g package                 # Install package globally"
+          - ""
+          - "Common NPM Commands:"
+          - "  npm init                                    # Initialize new project"
+          - "  npm install                                 # Install dependencies from package.json"
+          - "  npm install --save package                  # Install and save to dependencies"
+          - "  npm install --save-dev package              # Install and save to devDependencies"
+          - "  npm run script                              # Run script from package.json"
+          - "  npm list                                    # List installed packages"
+          - "  npm outdated                                # Check for outdated packages"
+          - "  npm update                                  # Update packages"
+          - ""
+          - "Development Examples:"
+          - "  node app.js                                 # Run application"
+          - "  node -p '2+2'                              # Print expression result"
+          - "  npm start                                   # Run start script"
+          - "  npm test                                    # Run test script"
+          - ""
+          - "Installation details:"
+          - "  Method: {{ 'Native package' if is_rolling_distribution else 'NodeSource LTS repository' }}"
+          - "  Node.js version: {{ nodejs_final_version.stdout }}"
+          - "  NPM version: {{ npm_final_version.stdout }}"
+          - "  Node.js binary: {{ nodejs_path.stdout }}"
+          - "  NPM binary: {{ npm_path.stdout }}"
+          - "  Test result: {{ nodejs_functionality_test.stdout }}"
+          - ""
+          - "Next steps:"
+          - "  1. Consider installing nvm for version management"
+          - "  2. Set up NPM registry if using private packages"
+          - "  3. Configure NPM global prefix: npm config set prefix ~/.local"
+
+  handlers:
+    - name: refresh package cache
+      package:
+        update_cache: yes

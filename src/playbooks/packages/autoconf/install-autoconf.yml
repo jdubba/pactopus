@@ -1,0 +1,153 @@
+---
+# Autoconf Installation Playbook
+# Cross-distribution autoconf (GNU Autotools) installation
+# Autoconf generates configure scripts for portable software builds
+
+- name: Install autoconf across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Package name mappings for different distributions
+    autoconf_packages:
+      # Debian family
+      Debian: autoconf
+      Ubuntu: autoconf
+      "Pop!_OS": autoconf
+      "Linux Mint": autoconf
+      elementary: autoconf
+      # Red Hat family
+      RedHat: autoconf
+      Fedora: autoconf
+      CentOS: autoconf
+      Rocky: autoconf
+      AlmaLinux: autoconf
+      # Arch family
+      Archlinux: autoconf
+      Manjaro: autoconf
+      # SUSE family
+      openSUSE: autoconf
+      SLES: autoconf
+      # Alpine
+      Alpine: autoconf
+    
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Show package name for this distribution
+      debug:
+        msg: "Autoconf package name for {{ ansible_distribution }}: {{ autoconf_packages[ansible_distribution] | default('autoconf') }}"
+
+    - name: Check if autoconf is already installed
+      command: autoconf --version
+      register: autoconf_version_check
+      failed_when: false
+      changed_when: false
+
+    - name: Display current autoconf version if installed
+      debug:
+        msg: "Autoconf is already installed: {{ autoconf_version_check.stdout | regex_replace('\\n.*', '') }}"
+      when: autoconf_version_check.rc == 0
+
+    - name: Update package cache
+      package:
+        update_cache: yes
+      when: autoconf_version_check.rc != 0
+
+    - name: Install/upgrade autoconf (Debian/Ubuntu)
+      apt:
+        name: "{{ autoconf_packages[ansible_distribution] | default('autoconf') }}"
+        state: latest
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Install/upgrade autoconf (RedHat/Fedora)
+      dnf:
+        name: "{{ autoconf_packages[ansible_distribution] | default('autoconf') }}"
+        state: latest
+      when: ansible_os_family == "RedHat"
+
+    - name: Install/upgrade autoconf (Arch Linux)
+      pacman:
+        name: "{{ autoconf_packages[ansible_distribution] | default('autoconf') }}"
+        state: latest
+      when: ansible_os_family == "Archlinux"
+
+    - name: Install/upgrade autoconf (SUSE)
+      zypper:
+        name: "{{ autoconf_packages[ansible_distribution] | default('autoconf') }}"
+        state: latest
+      when: ansible_os_family == "Suse"
+
+    - name: Install/upgrade autoconf (Alpine)
+      apk:
+        name: "{{ autoconf_packages[ansible_distribution] | default('autoconf') }}"
+        state: latest
+      when: ansible_os_family == "Alpine"
+
+    - name: Verify autoconf installation
+      command: autoconf --version
+      register: autoconf_final_version
+      changed_when: false
+
+    - name: Display final autoconf version
+      debug:
+        msg: "Autoconf installation complete: {{ autoconf_final_version.stdout | regex_replace('\\n.*', '') }}"
+
+    - name: Check autoconf binary location
+      shell: which autoconf
+      register: autoconf_path
+      changed_when: false
+
+    - name: Display autoconf binary location
+      debug:
+        msg: "Autoconf binary location: {{ autoconf_path.stdout }}"
+
+    - name: Test autoconf functionality
+      command: autoconf --help
+      register: autoconf_functionality_test
+      changed_when: false
+      failed_when: false
+
+    - name: Display autoconf usage and configuration hints
+      debug:
+        msg:
+          - "Autoconf installation complete!"
+          - "Usage: autoconf [OPTIONS] [TEMPLATE-FILE]    # Generate configure script"
+          - "       autoconf --version                     # Show version"
+          - "       autoconf --help                        # Show help"
+          - ""
+          - "Common Usage:"
+          - "  autoconf                                    # Generate configure from configure.ac"
+          - "  autoconf configure.in                       # Generate from specific template"
+          - "  autoreconf -fiv                            # Full regeneration (requires autoreconf)"
+          - ""
+          - "File Operations:"
+          - "  Input:  configure.ac or configure.in        # Template with autoconf macros"
+          - "  Output: configure                           # Generated shell script"
+          - ""
+          - "Part of GNU Autotools Chain:"
+          - "  1. autoconf - Generate configure scripts"
+          - "  2. automake - Generate Makefile.in templates"
+          - "  3. autoheader - Generate config.h templates"
+          - "  4. autoreconf - Convenience wrapper for all tools"
+          - ""
+          - "Installation details:"
+          - "  Method: Native package manager"
+          - "  Version: {{ autoconf_final_version.stdout | regex_replace('\\n.*', '') }}"
+          - "  Binary: {{ autoconf_path.stdout }}"
+          - ""
+          - "Next steps for new projects:"
+          - "  1. Create configure.ac with AC_INIT and AC_OUTPUT"
+          - "  2. Run 'autoconf' to generate configure script"
+          - "  3. Run './configure' to generate Makefiles"
+          - "  4. Consider using 'autoreconf -fiv' for complex projects"
+
+  handlers:
+    - name: refresh package cache
+      package:
+        update_cache: yes

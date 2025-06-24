@@ -1,0 +1,167 @@
+---
+# GCC Installation Playbook
+# Cross-distribution GCC (GNU Compiler Collection) installation
+# GCC provides C, C++, and other language compilers
+
+- name: Install GCC across distributions
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Package name mappings for different distributions
+    gcc_packages:
+      # Debian family
+      Debian: gcc
+      Ubuntu: gcc
+      "Pop!_OS": gcc
+      "Linux Mint": gcc
+      elementary: gcc
+      # Red Hat family
+      RedHat: gcc
+      Fedora: gcc
+      CentOS: gcc
+      Rocky: gcc
+      AlmaLinux: gcc
+      # Arch family
+      Archlinux: gcc
+      Manjaro: gcc
+      # SUSE family
+      openSUSE: gcc
+      SLES: gcc
+      # Alpine
+      Alpine: gcc
+    
+  tasks:
+    - name: Display detected OS information
+      debug:
+        msg: "Detected OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Show package name for this distribution
+      debug:
+        msg: "GCC package name for {{ ansible_distribution }}: {{ gcc_packages[ansible_distribution] | default('gcc') }}"
+
+    - name: Check if gcc is already installed
+      command: gcc --version
+      register: gcc_version_check
+      failed_when: false
+      changed_when: false
+
+    - name: Display current gcc version if installed
+      debug:
+        msg: "GCC is already installed: {{ gcc_version_check.stdout | regex_replace('\\n.*', '') }}"
+      when: gcc_version_check.rc == 0
+
+    - name: Update package cache
+      package:
+        update_cache: yes
+      when: gcc_version_check.rc != 0
+
+    - name: Install/upgrade gcc (Debian/Ubuntu)
+      apt:
+        name: "{{ gcc_packages[ansible_distribution] | default('gcc') }}"
+        state: latest
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Install/upgrade gcc (RedHat/Fedora)
+      dnf:
+        name: "{{ gcc_packages[ansible_distribution] | default('gcc') }}"
+        state: latest
+      when: ansible_os_family == "RedHat"
+
+    - name: Install/upgrade gcc (Arch Linux)
+      pacman:
+        name: "{{ gcc_packages[ansible_distribution] | default('gcc') }}"
+        state: latest
+      when: ansible_os_family == "Archlinux"
+
+    - name: Install/upgrade gcc (SUSE)
+      zypper:
+        name: "{{ gcc_packages[ansible_distribution] | default('gcc') }}"
+        state: latest
+      when: ansible_os_family == "Suse"
+
+    - name: Install/upgrade gcc (Alpine)
+      apk:
+        name: "{{ gcc_packages[ansible_distribution] | default('gcc') }}"
+        state: latest
+      when: ansible_os_family == "Alpine"
+
+    - name: Verify gcc installation
+      command: gcc --version
+      register: gcc_final_version
+      changed_when: false
+
+    - name: Display final gcc version
+      debug:
+        msg: "GCC installation complete: {{ gcc_final_version.stdout | regex_replace('\\n.*', '') }}"
+
+    - name: Check gcc binary location
+      shell: which gcc
+      register: gcc_path
+      changed_when: false
+
+    - name: Display gcc binary location
+      debug:
+        msg: "GCC binary location: {{ gcc_path.stdout }}"
+
+    - name: Test gcc functionality
+      shell: |
+        echo 'int main(){return 0;}' | gcc -x c - -o /tmp/gcc_test && /tmp/gcc_test
+        echo $?
+      register: gcc_functionality_test
+      changed_when: false
+      failed_when: false
+
+    - name: Clean up test files
+      file:
+        path: /tmp/gcc_test
+        state: absent
+
+    - name: Display gcc usage and configuration hints
+      debug:
+        msg:
+          - "GCC installation complete!"
+          - "Usage: gcc [OPTIONS] file...                 # Compile C programs"
+          - "       gcc --version                          # Show version"
+          - "       gcc --help                             # Show help"
+          - ""
+          - "Common Compilation Examples:"
+          - "  gcc hello.c -o hello                       # Basic compilation"
+          - "  gcc -Wall -g hello.c -o hello               # With warnings and debug info"
+          - "  gcc -O2 hello.c -o hello                    # With optimization"
+          - "  gcc -shared -fPIC lib.c -o lib.so           # Create shared library"
+          - ""
+          - "Important Flags:"
+          - "  -Wall          Enable all common warnings"
+          - "  -Wextra        Enable extra warnings"
+          - "  -g             Include debug information"
+          - "  -O2            Enable level 2 optimization"
+          - "  -std=c99       Use C99 standard"
+          - "  -I<dir>        Add include directory"
+          - "  -L<dir>        Add library directory"
+          - "  -l<lib>        Link with library"
+          - ""
+          - "Related Compilers:"
+          - "  g++            C++ compiler (install g++ package)"
+          - "  gfortran       Fortran compiler"
+          - "  gcov           Code coverage tool"
+          - "  gdb            GNU debugger"
+          - ""
+          - "Installation details:"
+          - "  Method: Native package manager"
+          - "  Version: {{ gcc_final_version.stdout | regex_replace('\\n.*', '') }}"
+          - "  Binary: {{ gcc_path.stdout }}"
+          - "  Test: {{ 'Compilation test passed' if gcc_functionality_test.stdout == '0' else 'Compilation test failed' }}"
+          - ""
+          - "Next steps:"
+          - "  1. Consider installing g++ for C++ development"
+          - "  2. Install libc6-dev (build-essential) for headers"
+          - "  3. Install make for build automation"
+
+  handlers:
+    - name: refresh package cache
+      package:
+        update_cache: yes

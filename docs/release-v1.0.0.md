@@ -13,16 +13,16 @@ This document tracks the implementation progress for Pactopus v1.0.0, a cross-di
 ## Phase 1: Project Foundation (feature/foundation)
 
 ### Tasks
-- [ ] Create project structure and Makefile
-  - [ ] Set up directories: `/src`, `/src/user`, `/src/playbooks`, `/docs`, `/tests`
-  - [ ] Create initial Makefile with install, test, lint targets
-  - [ ] Add CHANGELOG.md
+- [x] Create project structure and Makefile
+  - [x] Set up directories: `/src`, `/src/user`, `/src/playbooks`, `/docs`, `/tests`
+  - [x] Create initial Makefile with install, test, lint targets
+  - [x] Add CHANGELOG.md
 
-- [ ] Implement core CLI framework
-  - [ ] Create main pactopus bash script
-  - [ ] Implement command parsing structure
-  - [ ] Add help command
-  - [ ] Set up basic error handling
+- [x] Implement core CLI framework
+  - [x] Create main pactopus bash script
+  - [x] Implement command parsing structure
+  - [x] Add help command
+  - [x] Set up basic error handling
 
 - [ ] Add initial documentation
   - [ ] Update README.md with usage instructions

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 
 # Pactopus - Cross-distribution personal package management DSC tool
-# Version: 0.1.4
+# Version: 0.1.5
 
 set -euo pipefail
 
 # Global variables
-readonly PACTOPUS_VERSION="0.1.4"
+readonly PACTOPUS_VERSION="0.1.5"
 readonly SCRIPT_NAME=$(basename "$0")
 readonly MIN_ANSIBLE_VERSION="2.10"
 readonly MIN_ANSIBLE_COMMUNITY_VERSION="8.0.0"
@@ -418,6 +418,86 @@ validate_sudo_access() {
     fi
 }
 
+# Run ansible playbook for package set management
+run_package_set_playbook() {
+    local action="$1"
+    shift
+    local package_sets=("$@")
+    
+    if [[ ${#package_sets[@]} -eq 0 ]]; then
+        echo "Error: No package sets specified" >&2
+        return 1
+    fi
+    
+    # Determine playbook directory location
+    local playbook_dir
+    local inventory_path
+    
+    # First try the installed location
+    if [[ -d "$HOME/.local/share/pactopus/playbooks/package-sets" ]]; then
+        playbook_dir="$HOME/.local/share/pactopus/playbooks"
+        inventory_path="${playbook_dir}/inventory"
+    else
+        # Fallback to development location
+        local script_dir="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+        playbook_dir="${script_dir}/playbooks"
+        inventory_path="${playbook_dir}/inventory"
+    fi
+    
+    # Ensure ansible is available
+    if ! command -v ansible-playbook >/dev/null 2>&1; then
+        echo "Error: ansible-playbook not found. Run '${SCRIPT_NAME} setup' first." >&2
+        return 1
+    fi
+    
+    # Verify inventory file exists
+    if [[ ! -f "$inventory_path" ]]; then
+        echo "Error: Ansible inventory not found at: ${inventory_path}" >&2
+        return 1
+    fi
+    
+    local success_count=0
+    local total_count=${#package_sets[@]}
+    
+    # Process each package set
+    for package_set in "${package_sets[@]}"; do
+        local playbook_path="${playbook_dir}/package-sets/${package_set}/${action}-${package_set}.yml"
+        
+        if [[ ! -f "$playbook_path" ]]; then
+            echo "Error: Package set playbook not found for '${package_set}': ${playbook_path}" >&2
+            continue
+        fi
+        
+        echo "Running ${action} playbook for package set ${package_set}..."
+        
+        # Prepare extra variables for ansible
+        local extra_vars="source_install_location='$SOURCE_INSTALL_LOCATION'"
+        
+        # Package sets typically don't need become (they call pactopus install internally)
+        if ansible-playbook -i "$inventory_path" "$playbook_path" --extra-vars "$extra_vars"; then
+            echo "Successfully ${action}ed package set ${package_set}"
+            ((success_count++)) || true
+        else
+            echo "Error: Failed to ${action} package set ${package_set}" >&2
+        fi
+    done
+    
+    # Display summary
+    echo ""
+    echo "Package set ${action} summary: ${success_count}/${total_count} successful"
+    
+    if [[ $success_count -eq $total_count ]]; then
+        echo "All package sets ${action}ed successfully!"
+        return 0
+    elif [[ $success_count -gt 0 ]]; then
+        echo "Some package sets ${action}ed successfully, but some failed."
+        return 1
+    else
+        echo "All package set ${action} operations failed."
+        return 1
+    fi
+}
+
 # Run ansible playbook for package management
 run_ansible_playbook() {
     local action="$1"
@@ -434,7 +514,7 @@ run_ansible_playbook() {
     local inventory_path
     
     # First try the installed location
-    if [[ -d "$HOME/.local/share/pactopus/playbooks" ]]; then
+    if [[ -d "$HOME/.local/share/pactopus/playbooks/packages" ]]; then
         playbook_dir="$HOME/.local/share/pactopus/playbooks"
         inventory_path="${playbook_dir}/inventory"
     else
@@ -459,7 +539,7 @@ run_ansible_playbook() {
     # Check if any playbooks require sudo access
     local needs_sudo=false
     for package in "${packages[@]}"; do
-        local playbook_path="${playbook_dir}/${package}/${action}-${package}.yml"
+        local playbook_path="${playbook_dir}/packages/${package}/${action}-${package}.yml"
         if [[ -f "$playbook_path" ]] && grep -q "become: yes" "$playbook_path" 2>/dev/null; then
             needs_sudo=true
             break
@@ -481,7 +561,7 @@ run_ansible_playbook() {
     
     # Process each package
     for package in "${packages[@]}"; do
-        local playbook_path="${playbook_dir}/${package}/${action}-${package}.yml"
+        local playbook_path="${playbook_dir}/packages/${package}/${action}-${package}.yml"
         
         if [[ ! -f "$playbook_path" ]]; then
             echo "Error: Playbook not found for package '${package}': ${playbook_path}" >&2
@@ -529,16 +609,169 @@ run_ansible_playbook() {
     fi
 }
 
-# Install packages using ansible playbooks
-install_packages() {
-    run_ansible_playbook "install" "$@"
-    return $?
+# Get packages included in a package set
+get_package_set_contents() {
+    local package_set="$1"
+    local playbook_dir
+    
+    # Determine playbook directory location
+    if [[ -d "$HOME/.local/share/pactopus/playbooks/package-sets" ]]; then
+        playbook_dir="$HOME/.local/share/pactopus/playbooks"
+    else
+        local script_dir="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+        playbook_dir="${script_dir}/playbooks"
+    fi
+    
+    local playbook_path="${playbook_dir}/package-sets/${package_set}/install-${package_set}.yml"
+    
+    if [[ -f "$playbook_path" ]]; then
+        # Extract package list from the playbook's package variable (e.g., server_packages)
+        # Look for any variable ending in _packages that contains a list
+        grep -A 50 "_packages:" "$playbook_path" | grep -E "^\s*-\s+" | sed 's/^\s*-\s*//' | grep -v "^$"
+    else
+        echo ""
+    fi
 }
 
-# Remove packages using ansible playbooks
-remove_packages() {
-    run_ansible_playbook "remove" "$@"
-    return $?
+# Check if an item is a package or package set
+classify_items() {
+    local items=("$@")
+    local packages=()
+    local package_sets=()
+    local playbook_dir
+    
+    # Determine playbook directory location
+    if [[ -d "$HOME/.local/share/pactopus/playbooks/packages" ]]; then
+        playbook_dir="$HOME/.local/share/pactopus/playbooks"
+    else
+        local script_dir="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+        playbook_dir="${script_dir}/playbooks"
+    fi
+    
+    for item in "${items[@]}"; do
+        if [[ -d "${playbook_dir}/packages/${item}" ]]; then
+            packages+=("$item")
+        elif [[ -d "${playbook_dir}/package-sets/${item}" ]]; then
+            package_sets+=("$item")
+        else
+            echo "Warning: '${item}' is not a recognized package or package set" >&2
+        fi
+    done
+    
+    # Return results via global arrays
+    CLASSIFIED_PACKAGES=("${packages[@]}")
+    CLASSIFIED_PACKAGE_SETS=("${package_sets[@]}")
+}
+
+# Install packages and package sets with deduplication
+install_items() {
+    local items=("$@")
+    
+    if [[ ${#items[@]} -eq 0 ]]; then
+        echo "Error: No packages or package sets specified" >&2
+        return 1
+    fi
+    
+    # Classify items into packages and package sets
+    classify_items "${items[@]}"
+    
+    local packages=("${CLASSIFIED_PACKAGES[@]}")
+    local package_sets=("${CLASSIFIED_PACKAGE_SETS[@]}")
+    
+    # Get all packages included in package sets to avoid duplication
+    local set_packages=()
+    for package_set in "${package_sets[@]}"; do
+        local set_contents=($(get_package_set_contents "$package_set"))
+        set_packages+=("${set_contents[@]}")
+    done
+    
+    # Remove any individual packages that are already covered by package sets
+    local filtered_packages=()
+    for package in "${packages[@]}"; do
+        local is_in_set=false
+        for set_package in "${set_packages[@]}"; do
+            if [[ "$package" == "$set_package" ]]; then
+                is_in_set=true
+                echo "Note: Package '$package' is included in a package set and will be installed via the set"
+                break
+            fi
+        done
+        if [[ "$is_in_set" == false ]]; then
+            filtered_packages+=("$package")
+        fi
+    done
+    
+    local overall_success=true
+    
+    # Install package sets first
+    if [[ ${#package_sets[@]} -gt 0 ]]; then
+        echo "Installing package sets: ${package_sets[*]}"
+        if ! run_package_set_playbook "install" "${package_sets[@]}"; then
+            overall_success=false
+        fi
+    fi
+    
+    # Install remaining individual packages
+    if [[ ${#filtered_packages[@]} -gt 0 ]]; then
+        echo "Installing individual packages: ${filtered_packages[*]}"
+        if ! run_ansible_playbook "install" "${filtered_packages[@]}"; then
+            overall_success=false
+        fi
+    fi
+    
+    if [[ "$overall_success" == true ]]; then
+        echo ""
+        echo "All installations completed successfully!"
+        return 0
+    else
+        echo ""
+        echo "Some installations failed. Check output above for details."
+        return 1
+    fi
+}
+
+# Remove packages and package sets with deduplication
+remove_items() {
+    local items=("$@")
+    
+    if [[ ${#items[@]} -eq 0 ]]; then
+        echo "Error: No packages or package sets specified" >&2
+        return 1
+    fi
+    
+    # Classify items into packages and package sets
+    classify_items "${items[@]}"
+    
+    local packages=("${CLASSIFIED_PACKAGES[@]}")
+    local package_sets=("${CLASSIFIED_PACKAGE_SETS[@]}")
+    
+    local overall_success=true
+    
+    # Remove package sets first
+    if [[ ${#package_sets[@]} -gt 0 ]]; then
+        echo "Removing package sets: ${package_sets[*]}"
+        if ! run_package_set_playbook "remove" "${package_sets[@]}"; then
+            overall_success=false
+        fi
+    fi
+    
+    # Remove individual packages
+    if [[ ${#packages[@]} -gt 0 ]]; then
+        echo "Removing individual packages: ${packages[*]}"
+        if ! run_ansible_playbook "remove" "${packages[@]}"; then
+            overall_success=false
+        fi
+    fi
+    
+    if [[ "$overall_success" == true ]]; then
+        echo ""
+        echo "All removals completed successfully!"
+        return 0
+    else
+        echo ""
+        echo "Some removals failed. Check output above for details."
+        return 1
+    fi
 }
 
 # Print help information
@@ -566,7 +799,12 @@ Configuration:
       SOURCE_INSTALL_LOCATION - Directory for source installations (default: ~/source)
 
 Available packages:
-    git, gawk, make, stow, fzf, curl, fastfetch, bat, bash-completion, ripgrep, ble, neovim, starship, wget, sudo, which, xh, yai
+    Development Tools: autoconf, gcc, python3, nodejs, nvm
+    System Tools: git, gawk, make, stow, fzf, curl, fastfetch, bat, bash-completion, ripgrep, ble, neovim, starship, wget, sudo, which, xh, yai
+    Cloud & Containers: aws-cli, docker
+
+Available package sets:
+    server-packages - Essential server tools and utilities
 
 Examples:
     ${SCRIPT_NAME} version
@@ -575,6 +813,8 @@ Examples:
     ${SCRIPT_NAME} check
     ${SCRIPT_NAME} config
     ${SCRIPT_NAME} install git curl make
+    ${SCRIPT_NAME} install server-packages
+    ${SCRIPT_NAME} install server-packages git
     ${SCRIPT_NAME} remove git
     ${SCRIPT_NAME} install bat bash-completion ripgrep
 
@@ -616,22 +856,24 @@ main() {
             ;;
         install)
             if [[ $# -eq 0 ]]; then
-                echo "Error: No packages specified for installation" >&2
-                echo "Usage: ${SCRIPT_NAME} install <package1> [package2] ..." >&2
-                echo "Available packages: git, gawk, make, stow, fzf, curl, fastfetch, bat, bash-completion, ripgrep, ble, neovim, starship, wget, sudo, which, xh, yai" >&2
+                echo "Error: No packages or package sets specified for installation" >&2
+                echo "Usage: ${SCRIPT_NAME} install <item1> [item2] ..." >&2
+                echo "Available packages: autoconf, gcc, python3, nodejs, nvm, aws-cli, docker, git, gawk, make, stow, fzf, curl, fastfetch, bat, bash-completion, ripgrep, ble, neovim, starship, wget, sudo, which, xh, yai" >&2
+                echo "Available package sets: server-packages" >&2
                 exit 1
             fi
-            install_packages "$@"
+            install_items "$@"
             exit $?
             ;;
         remove)
             if [[ $# -eq 0 ]]; then
-                echo "Error: No packages specified for removal" >&2
-                echo "Usage: ${SCRIPT_NAME} remove <package1> [package2] ..." >&2
-                echo "Available packages: git, gawk, make, stow, fzf, curl, fastfetch, bat, bash-completion, ripgrep, ble, neovim, starship, wget, sudo, which, xh, yai" >&2
+                echo "Error: No packages or package sets specified for removal" >&2
+                echo "Usage: ${SCRIPT_NAME} remove <item1> [item2] ..." >&2
+                echo "Available packages: autoconf, gcc, python3, nodejs, nvm, aws-cli, docker, git, gawk, make, stow, fzf, curl, fastfetch, bat, bash-completion, ripgrep, ble, neovim, starship, wget, sudo, which, xh, yai" >&2
+                echo "Available package sets: server-packages" >&2
                 exit 1
             fi
-            remove_packages "$@"
+            remove_items "$@"
             exit $?
             ;;
         *)

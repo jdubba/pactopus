@@ -5,15 +5,14 @@ package:make
 package:curl
 package:stow
 package:fzf
-package:bat (batcat)
+package:bat
 package:bash-ocmpletion
 package:fastfetch
 package:ripgrep
 package:ble.sh
-package:fonts-minimal
 package:neovim
-package:starship (prompt)
-package:xh (curl/wget alternative)
+package:starship prompt
+package:xh
 package:wget
 package:yai
 package:sudo
@@ -35,7 +34,7 @@ package:flex
 package:gcc
 package:g++
 package:libc6-dev
-package:dpkg-dev (debian derivatives only)
+package:dpkg-dev
 package:gettext
 package:grup
 package:groff
@@ -47,7 +46,7 @@ package:patch
 package:sed
 package:texinfo
 package:NodeJs
-package:Node Version Manager (nvm)
+package:nvm
 package:docker
 package:claude-code
 package:openai-codex

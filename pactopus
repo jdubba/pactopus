@@ -1,0 +1,306 @@
+#!/bin/bash
+
+# Pactopus Simple Package Installer
+# Supports: Arch Linux, Fedora, Ubuntu
+# Usage: ./simple-install.sh [package-set1] [package-set2] ...
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_FILE="$SCRIPT_DIR/packages.conf"
+
+# Detect distribution
+detect_distro() {
+    if command -v pacman &> /dev/null; then
+        echo "arch"
+    elif command -v dnf &> /dev/null; then
+        echo "fedora"
+    elif command -v apt &> /dev/null; then
+        echo "ubuntu"
+    else
+        echo "Unsupported distribution" >&2
+        exit 1
+    fi
+}
+
+# Get package name for specific distribution
+get_package_name() {
+    local package="$1"
+    local distro="$2"
+    
+    # Skip comments and empty lines
+    local line=$(grep "^$package:" "$CONFIG_FILE" 2>/dev/null || echo "")
+    
+    if [ -z "$line" ]; then
+        echo "$package"  # Default to package name if not found
+        return
+    fi
+    
+    case "$distro" in
+        arch)
+            echo "$line" | cut -d: -f2
+            ;;
+        fedora)
+            echo "$line" | cut -d: -f3
+            ;;
+        ubuntu)
+            echo "$line" | cut -d: -f4
+            ;;
+    esac
+}
+
+# Install a single package
+install_package() {
+    local package="$1"
+    local distro="$2"
+    local pkg_name
+    
+    pkg_name=$(get_package_name "$package" "$distro")
+    
+    if [ "$pkg_name" = "SKIP" ]; then
+        echo "Skipping $package (not available on $distro)"
+        return
+    fi
+    
+    if [ "$pkg_name" = "SPECIAL" ]; then
+        install_special_package "$package" "$distro"
+        return
+    fi
+    
+    echo "Installing: $package ($pkg_name)"
+    
+    case "$distro" in
+        arch)
+            if ! pacman -Qi "$pkg_name" &> /dev/null; then
+                sudo pacman -S --noconfirm "$pkg_name" || echo "Warning: Failed to install $pkg_name"
+            else
+                echo "$pkg_name already installed"
+            fi
+            ;;
+        fedora)
+            if ! rpm -q "$pkg_name" &> /dev/null; then
+                sudo dnf install -y "$pkg_name" || echo "Warning: Failed to install $pkg_name"
+            else
+                echo "$pkg_name already installed"
+            fi
+            ;;
+        ubuntu)
+            if ! dpkg -l | grep -q "^ii  $pkg_name "; then
+                sudo apt install -y "$pkg_name" || echo "Warning: Failed to install $pkg_name"
+            else
+                echo "$pkg_name already installed"
+            fi
+            ;;
+    esac
+}
+
+# Handle special package installations
+install_special_package() {
+    local package="$1"
+    local distro="$2"
+    
+    case "$package" in
+        starship)
+            if ! command -v starship &> /dev/null; then
+                echo "Installing Starship prompt..."
+                curl -sS https://starship.rs/install.sh | sh -s -- -y
+            else
+                echo "Starship already installed"
+            fi
+            ;;
+        xh)
+            if ! command -v xh &> /dev/null; then
+                case "$distro" in
+                    ubuntu)
+                        if command -v snap &> /dev/null; then
+                            sudo snap install xh
+                        else
+                            echo "Warning: xh requires snap on Ubuntu"
+                        fi
+                        ;;
+                esac
+            else
+                echo "xh already installed"
+            fi
+            ;;
+        ble.sh)
+            if [ ! -d "$HOME/.local/share/blesh" ]; then
+                echo "Installing ble.sh..."
+                git clone --recursive https://github.com/akinomyoga/ble.sh.git /tmp/ble.sh
+                make -C /tmp/ble.sh install PREFIX="$HOME/.local"
+                rm -rf /tmp/ble.sh
+            else
+                echo "ble.sh already installed"
+            fi
+            ;;
+        nvm)
+            if [ ! -d "$HOME/.nvm" ]; then
+                echo "Installing NVM..."
+                curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
+            else
+                echo "NVM already installed"
+            fi
+            ;;
+        aws-cli)
+            if ! command -v aws &> /dev/null; then
+                echo "Installing AWS CLI..."
+                case "$distro" in
+                    arch)
+                        echo "Note: Consider installing aws-cli from AUR"
+                        ;;
+                    ubuntu)
+                        curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+                        unzip awscliv2.zip
+                        sudo ./aws/install
+                        rm -rf aws awscliv2.zip
+                        ;;
+                esac
+            else
+                echo "AWS CLI already installed"
+            fi
+            ;;
+        azure-cli)
+            if ! command -v az &> /dev/null; then
+                echo "Installing Azure CLI..."
+                case "$distro" in
+                    ubuntu)
+                        curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+                        ;;
+                    *)
+                        echo "Note: Azure CLI installation varies by distribution"
+                        ;;
+                esac
+            else
+                echo "Azure CLI already installed"
+            fi
+            ;;
+        fastfetch)
+            if ! command -v fastfetch &> /dev/null; then
+                case "$distro" in
+                    ubuntu)
+                        # Install from GitHub releases for Ubuntu
+                        echo "Installing fastfetch from GitHub..."
+                        wget -O /tmp/fastfetch.deb "https://github.com/fastfetch-cli/fastfetch/releases/latest/download/fastfetch-linux-amd64.deb"
+                        sudo dpkg -i /tmp/fastfetch.deb || sudo apt-get install -f -y
+                        rm /tmp/fastfetch.deb
+                        ;;
+                esac
+            else
+                echo "fastfetch already installed"
+            fi
+            ;;
+        brave-browser)
+            if ! command -v brave-browser &> /dev/null; then
+                echo "Installing Brave Browser..."
+                case "$distro" in
+                    ubuntu)
+                        curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+                        echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main" | sudo tee /etc/apt/sources.list.d/brave-browser-release.list
+                        sudo apt update
+                        sudo apt install -y brave-browser
+                        ;;
+                    *)
+                        echo "Note: Brave Browser installation varies by distribution"
+                        ;;
+                esac
+            else
+                echo "Brave Browser already installed"
+            fi
+            ;;
+        *)
+            echo "Unknown special package: $package"
+            ;;
+    esac
+}
+
+# Update package databases
+update_system() {
+    local distro="$1"
+    
+    echo "Updating package databases..."
+    case "$distro" in
+        arch)
+            sudo pacman -Sy
+            ;;
+        fedora)
+            sudo dnf check-update || true
+            ;;
+        ubuntu)
+            sudo apt update
+            ;;
+    esac
+}
+
+# Define package sets
+install_package_set() {
+    local set_name="$1"
+    local distro="$2"
+    
+    case "$set_name" in
+        server-packages)
+            local packages=(git gawk make curl stow fzf bat bash-completion fastfetch ripgrep ble.sh neovim starship xh wget sudo which)
+            ;;
+        cloud-packages)
+            local packages=(aws-cli azure-cli)
+            ;;
+        development-packages)
+            local packages=(autoconf automake binutils bison fakeroot file findutils flex gcc g++ libc6-dev gettext groff gzip libtool m4 make patch sed texinfo nodejs nvm docker go rust openjdk python3)
+            ;;
+        basic-workstation)
+            install_package_set "server-packages" "$distro"
+            local packages=(kitty brave-browser gh)
+            ;;
+        full-workstation)
+            install_package_set "server-packages" "$distro"
+            install_package_set "development-packages" "$distro"
+            install_package_set "cloud-packages" "$distro"
+            local packages=(kitty brave-browser gh gimp webp)
+            ;;
+        gnome-packages)
+            local packages=(gnome-extras)
+            ;;
+        hyprland-packages)
+            local packages=(hyprpaper)
+            ;;
+        *)
+            echo "Unknown package set: $set_name"
+            return 1
+            ;;
+    esac
+    
+    for package in "${packages[@]}"; do
+        install_package "$package" "$distro"
+    done
+}
+
+# Main script
+main() {
+    local distro
+    distro=$(detect_distro)
+    
+    echo "Detected distribution: $distro"
+    
+    if [ $# -eq 0 ]; then
+        echo "Usage: $0 [package-set1] [package-set2] ..."
+        echo "Available package sets:"
+        echo "  server-packages"
+        echo "  cloud-packages" 
+        echo "  development-packages"
+        echo "  basic-workstation"
+        echo "  full-workstation"
+        echo "  gnome-packages"
+        echo "  hyprland-packages"
+        exit 1
+    fi
+    
+    update_system "$distro"
+    
+    for package_set in "$@"; do
+        echo "Installing package set: $package_set"
+        install_package_set "$package_set" "$distro"
+    done
+    
+    echo "Installation complete!"
+}
+
+main "$@"

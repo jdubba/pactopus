@@ -307,11 +307,52 @@ install_package_set() {
     done
 }
 
-# Validate package set name
-validate_package_set() {
+# Normalize package set name (convert shortened names to full names)
+normalize_package_set_name() {
     local set_name="$1"
     
     case "$set_name" in
+        # Full names (already normalized)
+        server-packages|cloud-packages|development-packages|basic-workstation|full-workstation|gnome-packages|hyprland-packages)
+            echo "$set_name"
+            ;;
+        # Shortened names (add -packages suffix)
+        server)
+            echo "server-packages"
+            ;;
+        cloud)
+            echo "cloud-packages"
+            ;;
+        development|dev)
+            echo "development-packages"
+            ;;
+        gnome)
+            echo "gnome-packages"
+            ;;
+        hyprland)
+            echo "hyprland-packages"
+            ;;
+        # Special cases that don't follow the pattern
+        basic-workstation|basic)
+            echo "basic-workstation"
+            ;;
+        full-workstation|full)
+            echo "full-workstation"
+            ;;
+        *)
+            echo "$set_name"  # Return as-is if no normalization rule
+            ;;
+    esac
+}
+
+# Validate package set name
+validate_package_set() {
+    local set_name="$1"
+    local normalized_name
+    
+    normalized_name=$(normalize_package_set_name "$set_name")
+    
+    case "$normalized_name" in
         server-packages|cloud-packages|development-packages|basic-workstation|full-workstation|gnome-packages|hyprland-packages)
             return 0
             ;;
@@ -335,13 +376,13 @@ validate_all_package_sets() {
         echo "Error: Unknown package set(s): ${invalid_sets[*]}" >&2
         echo "" >&2
         echo "Available package sets:" >&2
-        echo "  server-packages" >&2
-        echo "  cloud-packages" >&2
-        echo "  development-packages" >&2
-        echo "  basic-workstation" >&2
-        echo "  full-workstation" >&2
-        echo "  gnome-packages" >&2
-        echo "  hyprland-packages" >&2
+        echo "  server-packages (or: server)" >&2
+        echo "  cloud-packages (or: cloud)" >&2
+        echo "  development-packages (or: development, dev)" >&2
+        echo "  basic-workstation (or: basic)" >&2
+        echo "  full-workstation (or: full)" >&2
+        echo "  gnome-packages (or: gnome)" >&2
+        echo "  hyprland-packages (or: hyprland)" >&2
         return 1
     fi
     
@@ -358,13 +399,13 @@ main() {
     if [ $# -eq 0 ]; then
         echo "Usage: $0 [package-set1] [package-set2] ..."
         echo "Available package sets:"
-        echo "  server-packages"
-        echo "  cloud-packages" 
-        echo "  development-packages"
-        echo "  basic-workstation"
-        echo "  full-workstation"
-        echo "  gnome-packages"
-        echo "  hyprland-packages"
+        echo "  server-packages (or: server)"
+        echo "  cloud-packages (or: cloud)" 
+        echo "  development-packages (or: development, dev)"
+        echo "  basic-workstation (or: basic)"
+        echo "  full-workstation (or: full)"
+        echo "  gnome-packages (or: gnome)"
+        echo "  hyprland-packages (or: hyprland)"
         exit 1
     fi
     
@@ -373,12 +414,18 @@ main() {
         exit 1
     fi
     
-    echo "Validated package sets: $*"
+    # Normalize package set names
+    local normalized_sets=()
+    for package_set in "$@"; do
+        normalized_sets+=($(normalize_package_set_name "$package_set"))
+    done
+    
+    echo "Validated package sets: ${normalized_sets[*]}"
     echo ""
     
     update_system "$distro"
     
-    for package_set in "$@"; do
+    for package_set in "${normalized_sets[@]}"; do
         echo "Installing package set: $package_set"
         install_package_set "$package_set" "$distro"
     done

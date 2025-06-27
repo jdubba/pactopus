@@ -296,7 +296,8 @@ install_package_set() {
             local packages=(hyprpaper)
             ;;
         *)
-            echo "Unknown package set: $set_name"
+            # This should never be reached due to upfront validation
+            echo "Internal error: Unhandled package set: $set_name" >&2
             return 1
             ;;
     esac
@@ -304,6 +305,47 @@ install_package_set() {
     for package in "${packages[@]}"; do
         install_package "$package" "$distro"
     done
+}
+
+# Validate package set name
+validate_package_set() {
+    local set_name="$1"
+    
+    case "$set_name" in
+        server-packages|cloud-packages|development-packages|basic-workstation|full-workstation|gnome-packages|hyprland-packages)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# Validate all requested package sets before installation
+validate_all_package_sets() {
+    local invalid_sets=()
+    
+    for package_set in "$@"; do
+        if ! validate_package_set "$package_set"; then
+            invalid_sets+=("$package_set")
+        fi
+    done
+    
+    if [ ${#invalid_sets[@]} -gt 0 ]; then
+        echo "Error: Unknown package set(s): ${invalid_sets[*]}" >&2
+        echo "" >&2
+        echo "Available package sets:" >&2
+        echo "  server-packages" >&2
+        echo "  cloud-packages" >&2
+        echo "  development-packages" >&2
+        echo "  basic-workstation" >&2
+        echo "  full-workstation" >&2
+        echo "  gnome-packages" >&2
+        echo "  hyprland-packages" >&2
+        return 1
+    fi
+    
+    return 0
 }
 
 # Main script
@@ -325,6 +367,14 @@ main() {
         echo "  hyprland-packages"
         exit 1
     fi
+    
+    # Validate all package sets before starting installation
+    if ! validate_all_package_sets "$@"; then
+        exit 1
+    fi
+    
+    echo "Validated package sets: $*"
+    echo ""
     
     update_system "$distro"
     

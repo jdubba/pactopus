@@ -9,6 +9,87 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="$SCRIPT_DIR/packages.conf"
 
+# Parse package sets from config file
+parse_package_sets() {
+    local current_set=""
+    local -A package_sets
+    
+    while IFS= read -r line; do
+        # Skip comments and empty lines
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${line// }" ]] && continue
+        
+        # Check for package set definition
+        if [[ "$line" =~ ^\[PACKAGE_SET:([^]]+)\]$ ]]; then
+            current_set="${BASH_REMATCH[1]}"
+            package_sets["$current_set"]=""
+        # Check for package definition (end of package sets)
+        elif [[ "$line" =~ ^\[PACKAGE: ]]; then
+            break
+        # Add package to current set
+        elif [[ -n "$current_set" ]]; then
+            if [[ "$line" =~ ^@(.+)$ ]]; then
+                # Reference to another package set
+                local ref_set="${BASH_REMATCH[1]}"
+                package_sets["$current_set"]+="@$ref_set "
+            else
+                # Regular package
+                package_sets["$current_set"]+="$line "
+            fi
+        fi
+    done < "$CONFIG_FILE"
+    
+    # Export package sets as global variables (replace hyphens with underscores for valid variable names)
+    for set_name in "${!package_sets[@]}"; do
+        local var_name="PACKAGE_SET_${set_name//-/_}"
+        declare -g "$var_name"="${package_sets[$set_name]}"
+    done
+}
+
+# Get available package sets from config
+get_available_package_sets() {
+    local sets=()
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^\[PACKAGE_SET:([^]]+)\]$ ]]; then
+            sets+=("${BASH_REMATCH[1]}")
+        fi
+    done < "$CONFIG_FILE"
+    printf '%s\n' "${sets[@]}"
+}
+
+# Get packages for a specific package set (with reference resolution)
+get_package_set_packages() {
+    local set_name="$1"
+    local -A visited_sets
+    local packages=""
+    
+    _resolve_package_set() {
+        local current_set="$1"
+        
+        # Prevent infinite recursion
+        if [[ -n "${visited_sets[$current_set]}" ]]; then
+            return
+        fi
+        visited_sets["$current_set"]=1
+        
+        local var_name="PACKAGE_SET_${current_set//-/_}"
+        local set_packages="${!var_name}"
+        
+        for pkg in $set_packages; do
+            if [[ "$pkg" =~ ^@(.+)$ ]]; then
+                # Resolve reference to another package set
+                _resolve_package_set "${BASH_REMATCH[1]}"
+            else
+                # Add regular package
+                packages+="$pkg "
+            fi
+        done
+    }
+    
+    _resolve_package_set "$set_name"
+    echo "$packages"
+}
+
 # Detect distribution
 detect_distro() {
     if command -v pacman &> /dev/null; then
@@ -28,25 +109,31 @@ get_package_name() {
     local package="$1"
     local distro="$2"
     
-    # Skip comments and empty lines
-    local line=$(grep "^$package:" "$CONFIG_FILE" 2>/dev/null || echo "")
+    # Look for package definition in config file
+    local line
+    line=$(grep "^\[PACKAGE:$package:" "$CONFIG_FILE" 2>/dev/null || echo "")
     
-    if [ -z "$line" ]; then
+    if [[ -z "$line" ]]; then
         echo "$package"  # Default to package name if not found
         return
     fi
     
-    case "$distro" in
-        arch)
-            echo "$line" | cut -d: -f2
-            ;;
-        fedora)
-            echo "$line" | cut -d: -f3
-            ;;
-        ubuntu)
-            echo "$line" | cut -d: -f4
-            ;;
-    esac
+    # Parse the package definition: [PACKAGE:name:arch:fedora:ubuntu]
+    if [[ "$line" =~ ^\[PACKAGE:([^:]+):([^:]+):([^:]+):([^]]+)\]$ ]]; then
+        case "$distro" in
+            arch)
+                echo "${BASH_REMATCH[2]}"
+                ;;
+            fedora)
+                echo "${BASH_REMATCH[3]}"
+                ;;
+            ubuntu)
+                echo "${BASH_REMATCH[4]}"
+                ;;
+        esac
+    else
+        echo "$package"  # Fallback
+    fi
 }
 
 # Install a single package
@@ -269,40 +356,17 @@ install_package_set() {
     local set_name="$1"
     local distro="$2"
     
-    case "$set_name" in
-        server-packages)
-            local packages=(git gawk make curl stow fzf bat bash-completion fastfetch ripgrep ble.sh neovim starship xh wget sudo which yay)
-            ;;
-        cloud-packages)
-            local packages=(aws-cli azure-cli)
-            ;;
-        development-packages)
-            local packages=(autoconf automake binutils bison fakeroot file findutils flex gcc g++ libc6-dev gettext groff gzip libtool m4 make patch sed texinfo nodejs nvm docker go rust openjdk python3)
-            ;;
-        basic-workstation)
-            install_package_set "server-packages" "$distro"
-            local packages=(kitty brave-browser gh)
-            ;;
-        full-workstation)
-            install_package_set "server-packages" "$distro"
-            install_package_set "development-packages" "$distro"
-            install_package_set "cloud-packages" "$distro"
-            local packages=(kitty brave-browser gh gimp webp)
-            ;;
-        gnome-packages)
-            local packages=(gnome-extras)
-            ;;
-        hyprland-packages)
-            local packages=(hyprpaper)
-            ;;
-        *)
-            # This should never be reached due to upfront validation
-            echo "Internal error: Unhandled package set: $set_name" >&2
-            return 1
-            ;;
-    esac
+    # Get packages for this set from config
+    local packages
+    packages=$(get_package_set_packages "$set_name")
     
-    for package in "${packages[@]}"; do
+    if [[ -z "$packages" ]]; then
+        echo "Internal error: No packages found for set: $set_name" >&2
+        return 1
+    fi
+    
+    # Install each package
+    for package in $packages; do
         install_package "$package" "$distro"
     done
 }
@@ -352,14 +416,17 @@ validate_package_set() {
     
     normalized_name=$(normalize_package_set_name "$set_name")
     
-    case "$normalized_name" in
-        server-packages|cloud-packages|development-packages|basic-workstation|full-workstation|gnome-packages|hyprland-packages)
+    # Check if the normalized name exists in available package sets
+    local available_sets
+    available_sets=$(get_available_package_sets)
+    
+    while IFS= read -r available_set; do
+        if [[ "$normalized_name" == "$available_set" ]]; then
             return 0
-            ;;
-        *)
-            return 1
-            ;;
-    esac
+        fi
+    done <<< "$available_sets"
+    
+    return 1
 }
 
 # Validate all requested package sets before installation
@@ -376,13 +443,24 @@ validate_all_package_sets() {
         echo "Error: Unknown package set(s): ${invalid_sets[*]}" >&2
         echo "" >&2
         echo "Available package sets:" >&2
-        echo "  server-packages (or: server)" >&2
-        echo "  cloud-packages (or: cloud)" >&2
-        echo "  development-packages (or: development, dev)" >&2
-        echo "  basic-workstation (or: basic)" >&2
-        echo "  full-workstation (or: full)" >&2
-        echo "  gnome-packages (or: gnome)" >&2
-        echo "  hyprland-packages (or: hyprland)" >&2
+        
+        # Dynamically show available package sets with shortened names
+        local available_sets
+        available_sets=$(get_available_package_sets)
+        while IFS= read -r set_name; do
+            local short_names=""
+            case "$set_name" in
+                server-packages) short_names=" (or: server)" ;;
+                cloud-packages) short_names=" (or: cloud)" ;;
+                development-packages) short_names=" (or: development, dev)" ;;
+                basic-workstation) short_names=" (or: basic)" ;;
+                full-workstation) short_names=" (or: full)" ;;
+                gnome-packages) short_names=" (or: gnome)" ;;
+                hyprland-packages) short_names=" (or: hyprland)" ;;
+            esac
+            echo "  $set_name$short_names" >&2
+        done <<< "$available_sets"
+        
         return 1
     fi
     
@@ -396,16 +474,30 @@ main() {
     
     echo "Detected distribution: $distro"
     
+    # Parse package sets from config file
+    parse_package_sets
+    
     if [ $# -eq 0 ]; then
         echo "Usage: $0 [package-set1] [package-set2] ..."
         echo "Available package sets:"
-        echo "  server-packages (or: server)"
-        echo "  cloud-packages (or: cloud)" 
-        echo "  development-packages (or: development, dev)"
-        echo "  basic-workstation (or: basic)"
-        echo "  full-workstation (or: full)"
-        echo "  gnome-packages (or: gnome)"
-        echo "  hyprland-packages (or: hyprland)"
+        
+        # Dynamically show available package sets
+        local available_sets
+        available_sets=$(get_available_package_sets)
+        while IFS= read -r set_name; do
+            local short_names=""
+            case "$set_name" in
+                server-packages) short_names=" (or: server)" ;;
+                cloud-packages) short_names=" (or: cloud)" ;;
+                development-packages) short_names=" (or: development, dev)" ;;
+                basic-workstation) short_names=" (or: basic)" ;;
+                full-workstation) short_names=" (or: full)" ;;
+                gnome-packages) short_names=" (or: gnome)" ;;
+                hyprland-packages) short_names=" (or: hyprland)" ;;
+            esac
+            echo "  $set_name$short_names"
+        done <<< "$available_sets"
+        
         exit 1
     fi
     

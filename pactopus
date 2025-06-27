@@ -146,7 +146,17 @@ install_special_package() {
                 echo "Installing AWS CLI..."
                 case "$distro" in
                     arch)
-                        echo "Note: Consider installing aws-cli from AUR"
+                        if command -v yay &> /dev/null; then
+                            echo "Installing AWS CLI from AUR using yay..."
+                            yay -S --noconfirm aws-cli-v2
+                        else
+                            echo "Warning: yay not found. Installing AWS CLI manually..."
+                            # Fallback to manual installation
+                            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+                            unzip awscliv2.zip
+                            sudo ./aws/install
+                            rm -rf aws awscliv2.zip
+                        fi
                         ;;
                     ubuntu)
                         curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
@@ -207,6 +217,29 @@ install_special_package() {
                 echo "Brave Browser already installed"
             fi
             ;;
+        yay)
+            if ! command -v yay &> /dev/null; then
+                case "$distro" in
+                    arch)
+                        echo "Installing yay AUR helper..."
+                        # Install base-devel if not already installed
+                        sudo pacman -S --needed --noconfirm base-devel git
+                        # Clone yay from AUR
+                        cd /tmp
+                        git clone https://aur.archlinux.org/yay.git
+                        cd yay
+                        makepkg -si --noconfirm
+                        cd /
+                        rm -rf /tmp/yay
+                        ;;
+                    *)
+                        echo "yay is only available on Arch Linux"
+                        ;;
+                esac
+            else
+                echo "yay already installed"
+            fi
+            ;;
         *)
             echo "Unknown special package: $package"
             ;;
@@ -238,7 +271,7 @@ install_package_set() {
     
     case "$set_name" in
         server-packages)
-            local packages=(git gawk make curl stow fzf bat bash-completion fastfetch ripgrep ble.sh neovim starship xh wget sudo which)
+            local packages=(git gawk make curl stow fzf bat bash-completion fastfetch ripgrep ble.sh neovim starship xh wget sudo which yay)
             ;;
         cloud-packages)
             local packages=(aws-cli azure-cli)

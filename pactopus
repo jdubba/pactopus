@@ -297,11 +297,40 @@ install_special_package() {
             if ! command -v az &> /dev/null; then
                 echo "Installing Azure CLI..."
                 case "$distro" in
+                    arch)
+                        if command -v yay &> /dev/null; then
+                            echo "Installing Azure CLI from AUR using yay..."
+                            yay -S --noconfirm azure-cli
+                        elif command -v paru &> /dev/null; then
+                            echo "Installing Azure CLI from AUR using paru..."
+                            paru -S --noconfirm azure-cli
+                        else
+                            echo "Error: AUR helper (yay or paru) required for Azure CLI installation on Arch"
+                            echo "Please install yay or paru first, then retry"
+                            return 1
+                        fi
+                        ;;
+                    fedora)
+                        echo "Adding Microsoft repository for Azure CLI..."
+                        # Import Microsoft signing key
+                        sudo rpm --import https://packages.microsoft.com/keys/microsoft.asc
+                        # Add Microsoft Azure CLI repository
+                        echo -e "[azure-cli]
+name=Azure CLI
+baseurl=https://packages.microsoft.com/yumrepos/azure-cli
+enabled=1
+gpgcheck=1
+gpgkey=https://packages.microsoft.com/keys/microsoft.asc" | sudo tee /etc/yum.repos.d/azure-cli.repo
+                        # Install Azure CLI
+                        sudo dnf install -y azure-cli
+                        ;;
                     ubuntu)
+                        echo "Installing Azure CLI using Microsoft's installation script..."
                         curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
                         ;;
                     *)
-                        echo "Note: Azure CLI installation varies by distribution"
+                        echo "Azure CLI installation not configured for $distro"
+                        echo "Please install manually from https://docs.microsoft.com/en-us/cli/azure/install-azure-cli"
                         ;;
                 esac
             else

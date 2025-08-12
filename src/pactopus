@@ -9,6 +9,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 CONFIG_FILE="$PROJECT_ROOT/packages.conf"
+GNOME_CONFIG_FILE="$PROJECT_ROOT/gnome-packages.conf"
 STATE_DIR="$HOME/.config/pactopus"
 STATE_FILE="$STATE_DIR/state.conf"
 DOTFILES_DIR="$HOME/source/dotfiles"
@@ -50,6 +51,23 @@ check_system() {
     fi
 }
 
+# Detect if running in GNOME environment
+is_gnome_environment() {
+    # Check for GNOME session
+    if [[ "$XDG_CURRENT_DESKTOP" == *"GNOME"* ]] || \
+       [[ "$DESKTOP_SESSION" == *"gnome"* ]] || \
+       [[ "$XDG_SESSION_DESKTOP" == *"gnome"* ]]; then
+        return 0
+    fi
+    
+    # Check if gnome-shell is running
+    if pgrep -x "gnome-shell" > /dev/null 2>&1; then
+        return 0
+    fi
+    
+    return 1
+}
+
 # Parse packages from config file
 get_packages() {
     local packages=()
@@ -71,6 +89,37 @@ get_packages() {
             packages+=("$package")
         fi
     done < "$CONFIG_FILE"
+    
+    echo "REGULAR:${packages[*]}"
+    echo "SPECIAL:${special_packages[*]}"
+}
+
+# Parse GNOME packages from config file
+get_gnome_packages() {
+    local packages=()
+    local special_packages=()
+    
+    # Only process if GNOME config file exists
+    if [[ ! -f "$GNOME_CONFIG_FILE" ]]; then
+        return 0
+    fi
+    
+    while IFS= read -r line; do
+        # Skip comments and empty lines
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${line// }" ]] && continue
+        
+        # Check if it's a special package
+        if [[ "$line" =~ ^([^#]+)#[[:space:]]*SPECIAL ]]; then
+            package="${BASH_REMATCH[1]}"
+            package="${package%% *}"  # Trim trailing spaces
+            special_packages+=("$package")
+        else
+            # Regular package
+            package="${line%% *}"  # Get first word, trim trailing spaces
+            packages+=("$package")
+        fi
+    done < "$GNOME_CONFIG_FILE"
     
     echo "REGULAR:${packages[*]}"
     echo "SPECIAL:${special_packages[*]}"
@@ -192,6 +241,30 @@ gpgkey=https://packages.microsoft.com/keys/microsoft.asc" | sudo tee /etc/yum.re
             fi
             ;;
             
+        gnome-shell-extension-pop-shell)
+            if [[ ! -d "$HOME/.local/share/gnome-shell/extensions/pop-shell@system76.com" ]]; then
+                print_info "Installing Pop Shell GNOME extension..."
+                
+                # Install dependencies
+                sudo dnf install -y gnome-shell-extension-native-window-placement xprop
+                
+                # Clone and build Pop Shell
+                TEMP_DIR=$(mktemp -d)
+                cd "$TEMP_DIR"
+                git clone https://github.com/pop-os/shell.git
+                cd shell
+                make local-install
+                
+                # Clean up
+                cd - > /dev/null
+                rm -rf "$TEMP_DIR"
+                
+                print_info "Pop Shell installed. Please restart GNOME Shell (Alt+F2, then 'r') and enable in Extensions app"
+            else
+                print_info "Pop Shell already installed"
+            fi
+            ;;
+            
         *)
             print_warning "Unknown special package: $package"
             ;;
@@ -294,6 +367,51 @@ cmd_install() {
         done
     fi
     
+    # Install GNOME packages if in GNOME environment
+    if is_gnome_environment; then
+        print_info "GNOME desktop detected. Installing GNOME-specific packages..."
+        
+        # Parse GNOME packages
+        IFS=$'\n' read -d '' -r -a gnome_package_data < <(get_gnome_packages && printf '\0')
+        
+        for line in "${gnome_package_data[@]}"; do
+            if [[ "$line" =~ ^REGULAR:(.*)$ ]]; then
+                gnome_regular_packages="${BASH_REMATCH[1]}"
+            elif [[ "$line" =~ ^SPECIAL:(.*)$ ]]; then
+                gnome_special_packages="${BASH_REMATCH[1]}"
+            fi
+        done
+        
+        # Install regular GNOME packages
+        if [[ -n "$gnome_regular_packages" ]]; then
+            IFS=' ' read -ra gnome_pkgs <<< "$gnome_regular_packages"
+            
+            gnome_to_install=()
+            for pkg in "${gnome_pkgs[@]}"; do
+                if ! rpm -q "$pkg" &>/dev/null; then
+                    gnome_to_install+=("$pkg")
+                else
+                    print_info "$pkg is already installed"
+                fi
+            done
+            
+            if [[ ${#gnome_to_install[@]} -gt 0 ]]; then
+                print_info "Installing GNOME packages: ${gnome_to_install[*]}"
+                sudo dnf install -y "${gnome_to_install[@]}"
+            fi
+        fi
+        
+        # Install special GNOME packages
+        if [[ -n "$gnome_special_packages" ]]; then
+            IFS=' ' read -ra gnome_special_pkgs <<< "$gnome_special_packages"
+            for pkg in "${gnome_special_pkgs[@]}"; do
+                install_special_package "$pkg"
+            done
+        fi
+    else
+        print_info "GNOME desktop not detected. Skipping GNOME-specific packages."
+    fi
+    
     # Install dotfiles
     install_dotfiles
     
@@ -309,6 +427,84 @@ cmd_update() {
     
     print_info "Updating all packages..."
     sudo dnf upgrade -y
+    
+    # Re-run package installation to catch any missing packages
+    print_info "Checking for missing packages..."
+    
+    # Parse regular packages
+    IFS=$'\n' read -d '' -r -a package_data < <(get_packages && printf '\0')
+    
+    for line in "${package_data[@]}"; do
+        if [[ "$line" =~ ^REGULAR:(.*)$ ]]; then
+            regular_packages="${BASH_REMATCH[1]}"
+        elif [[ "$line" =~ ^SPECIAL:(.*)$ ]]; then
+            special_packages="${BASH_REMATCH[1]}"
+        fi
+    done
+    
+    # Check and install missing regular packages
+    if [[ -n "$regular_packages" ]]; then
+        IFS=' ' read -ra pkgs <<< "$regular_packages"
+        to_install=()
+        for pkg in "${pkgs[@]}"; do
+            if ! rpm -q "$pkg" &>/dev/null; then
+                to_install+=("$pkg")
+            fi
+        done
+        
+        if [[ ${#to_install[@]} -gt 0 ]]; then
+            print_info "Installing missing packages: ${to_install[*]}"
+            sudo dnf install -y "${to_install[@]}"
+        fi
+    fi
+    
+    # Re-install special packages if needed
+    if [[ -n "$special_packages" ]]; then
+        IFS=' ' read -ra special_pkgs <<< "$special_packages"
+        for pkg in "${special_pkgs[@]}"; do
+            install_special_package "$pkg"
+        done
+    fi
+    
+    # Check GNOME packages if in GNOME environment
+    if is_gnome_environment; then
+        print_info "Checking for missing GNOME packages..."
+        
+        # Parse GNOME packages
+        IFS=$'\n' read -d '' -r -a gnome_package_data < <(get_gnome_packages && printf '\0')
+        
+        for line in "${gnome_package_data[@]}"; do
+            if [[ "$line" =~ ^REGULAR:(.*)$ ]]; then
+                gnome_regular_packages="${BASH_REMATCH[1]}"
+            elif [[ "$line" =~ ^SPECIAL:(.*)$ ]]; then
+                gnome_special_packages="${BASH_REMATCH[1]}"
+            fi
+        done
+        
+        # Check and install missing GNOME packages
+        if [[ -n "$gnome_regular_packages" ]]; then
+            IFS=' ' read -ra gnome_pkgs <<< "$gnome_regular_packages"
+            gnome_to_install=()
+            for pkg in "${gnome_pkgs[@]}"; do
+                if ! rpm -q "$pkg" &>/dev/null; then
+                    gnome_to_install+=("$pkg")
+                fi
+            done
+            
+            if [[ ${#gnome_to_install[@]} -gt 0 ]]; then
+                print_info "Installing missing GNOME packages: ${gnome_to_install[*]}"
+                sudo dnf install -y "${gnome_to_install[@]}"
+            fi
+        fi
+        
+        # Re-install special GNOME packages if needed
+        if [[ -n "$gnome_special_packages" ]]; then
+            IFS=' ' read -ra gnome_special_pkgs <<< "$gnome_special_packages"
+            for pkg in "${gnome_special_pkgs[@]}"; do
+                install_special_package "$pkg"
+            done
+        fi
+    fi
     
     # Update dotfiles
     install_dotfiles
@@ -369,7 +565,11 @@ cmd_list() {
             awscli2) cmd="aws" ;;
             azure-cli) cmd="az" ;;
             code) cmd="code" ;;
+            eza) cmd="eza" ;;
             brave-browser) cmd="brave-browser" ;;
+            gnome-shell-extension-pop-shell) 
+                [[ -d "$HOME/.local/share/gnome-shell/extensions/pop-shell@system76.com" ]] && echo "  ✓ $pkg" || echo "    $pkg"
+                continue ;;
             *) cmd="$pkg" ;;
         esac
         
@@ -379,6 +579,52 @@ cmd_list() {
             echo "    $pkg"
         fi
     done
+    
+    # Show GNOME packages if in GNOME environment
+    if is_gnome_environment; then
+        echo ""
+        print_info "GNOME Desktop packages from $GNOME_CONFIG_FILE:"
+        echo ""
+        
+        # Parse GNOME packages
+        IFS=$'\n' read -d '' -r -a gnome_package_data < <(get_gnome_packages && printf '\0')
+        
+        for line in "${gnome_package_data[@]}"; do
+            if [[ "$line" =~ ^REGULAR:(.*)$ ]]; then
+                gnome_regular_packages="${BASH_REMATCH[1]}"
+            elif [[ "$line" =~ ^SPECIAL:(.*)$ ]]; then
+                gnome_special_packages="${BASH_REMATCH[1]}"
+            fi
+        done
+        
+        if [[ -n "$gnome_regular_packages" ]]; then
+            echo "GNOME packages (installed via dnf):"
+            IFS=' ' read -ra gnome_pkgs <<< "$gnome_regular_packages"
+            for pkg in "${gnome_pkgs[@]}"; do
+                if rpm -q "$pkg" &>/dev/null; then
+                    echo "  ✓ $pkg"
+                else
+                    echo "    $pkg"
+                fi
+            done
+        fi
+        
+        if [[ -n "$gnome_special_packages" ]]; then
+            echo ""
+            echo "GNOME special packages (custom installation):"
+            IFS=' ' read -ra gnome_special_pkgs <<< "$gnome_special_packages"
+            for pkg in "${gnome_special_pkgs[@]}"; do
+                case "$pkg" in
+                    gnome-shell-extension-pop-shell) 
+                        [[ -d "$HOME/.local/share/gnome-shell/extensions/pop-shell@system76.com" ]] && echo "  ✓ $pkg" || echo "    $pkg"
+                        ;;
+                    *)
+                        echo "    $pkg"
+                        ;;
+                esac
+            done
+        fi
+    fi
 }
 
 # Help command

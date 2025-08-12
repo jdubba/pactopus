@@ -6,10 +6,9 @@
 set -e
 
 # Configuration
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-CONFIG_FILE="$PROJECT_ROOT/packages.conf"
-GNOME_CONFIG_FILE="$PROJECT_ROOT/gnome-packages.conf"
+CONFIG_DIR="$HOME/.local/etc/pactopus"
+CONFIG_FILE="$CONFIG_DIR/packages.conf"
+GNOME_CONFIG_FILE="$CONFIG_DIR/gnome-packages.conf"
 STATE_DIR="$HOME/.config/pactopus"
 STATE_FILE="$STATE_DIR/state.conf"
 DOTFILES_DIR="$HOME/source/dotfiles"
@@ -50,6 +49,13 @@ check_system() {
     
     if [[ ! -f /etc/fedora-release ]]; then
         print_warning "This tool is designed for Fedora. Proceed with caution."
+    fi
+    
+    # Check for config files
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        print_error "Configuration file not found: $CONFIG_FILE"
+        print_error "Please run 'make install' from the pactopus source directory first"
+        exit 1
     fi
 }
 
@@ -420,6 +426,8 @@ cmd_install() {
         fi
     done
     
+    # Install ALL dnf packages first (regular and GNOME) to ensure dependencies are met
+    
     # Install regular packages
     if [[ -n "$regular_packages" ]]; then
         print_info "Installing packages via dnf..."
@@ -443,16 +451,7 @@ cmd_install() {
         fi
     fi
     
-    # Install special packages
-    if [[ -n "$special_packages" ]]; then
-        print_info "Installing special packages..."
-        IFS=' ' read -ra special_pkgs <<< "$special_packages"
-        for pkg in "${special_pkgs[@]}"; do
-            install_special_package "$pkg"
-        done
-    fi
-    
-    # Install GNOME packages if in GNOME environment
+    # Install GNOME regular packages if in GNOME environment
     if is_gnome_environment; then
         print_info "GNOME desktop detected. Installing GNOME-specific packages..."
         
@@ -485,16 +484,26 @@ cmd_install() {
                 sudo dnf install -y "${gnome_to_install[@]}"
             fi
         fi
-        
-        # Install special GNOME packages
-        if [[ -n "$gnome_special_packages" ]]; then
-            IFS=' ' read -ra gnome_special_pkgs <<< "$gnome_special_packages"
-            for pkg in "${gnome_special_pkgs[@]}"; do
-                install_special_package "$pkg"
-            done
-        fi
     else
         print_info "GNOME desktop not detected. Skipping GNOME-specific packages."
+    fi
+    
+    # Now install special packages after all dnf packages are installed
+    if [[ -n "$special_packages" ]]; then
+        print_info "Installing special packages..."
+        IFS=' ' read -ra special_pkgs <<< "$special_packages"
+        for pkg in "${special_pkgs[@]}"; do
+            install_special_package "$pkg"
+        done
+    fi
+    
+    # Install special GNOME packages if in GNOME environment
+    if is_gnome_environment && [[ -n "$gnome_special_packages" ]]; then
+        print_info "Installing special GNOME packages..."
+        IFS=' ' read -ra gnome_special_pkgs <<< "$gnome_special_packages"
+        for pkg in "${gnome_special_pkgs[@]}"; do
+            install_special_package "$pkg"
+        done
     fi
     
     # Install dotfiles
@@ -530,6 +539,8 @@ cmd_update() {
         fi
     done
     
+    # Install ALL dnf packages first (regular and GNOME) to ensure dependencies are met
+    
     # Check and install missing regular packages
     if [[ -n "$regular_packages" ]]; then
         IFS=' ' read -ra pkgs <<< "$regular_packages"
@@ -546,15 +557,7 @@ cmd_update() {
         fi
     fi
     
-    # Re-install special packages if needed
-    if [[ -n "$special_packages" ]]; then
-        IFS=' ' read -ra special_pkgs <<< "$special_packages"
-        for pkg in "${special_pkgs[@]}"; do
-            install_special_package "$pkg"
-        done
-    fi
-    
-    # Check GNOME packages if in GNOME environment
+    # Check GNOME regular packages if in GNOME environment
     if is_gnome_environment; then
         print_info "Checking for missing GNOME packages..."
         
@@ -584,14 +587,22 @@ cmd_update() {
                 sudo dnf install -y "${gnome_to_install[@]}"
             fi
         fi
-        
-        # Re-install special GNOME packages if needed
-        if [[ -n "$gnome_special_packages" ]]; then
-            IFS=' ' read -ra gnome_special_pkgs <<< "$gnome_special_packages"
-            for pkg in "${gnome_special_pkgs[@]}"; do
-                install_special_package "$pkg"
-            done
-        fi
+    fi
+    
+    # Now re-install special packages after all dnf packages are installed
+    if [[ -n "$special_packages" ]]; then
+        IFS=' ' read -ra special_pkgs <<< "$special_packages"
+        for pkg in "${special_pkgs[@]}"; do
+            install_special_package "$pkg"
+        done
+    fi
+    
+    # Re-install special GNOME packages if in GNOME environment
+    if is_gnome_environment && [[ -n "$gnome_special_packages" ]]; then
+        IFS=' ' read -ra gnome_special_pkgs <<< "$gnome_special_packages"
+        for pkg in "${gnome_special_pkgs[@]}"; do
+            install_special_package "$pkg"
+        done
     fi
     
     # Update dotfiles

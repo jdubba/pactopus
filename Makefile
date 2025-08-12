@@ -3,6 +3,7 @@
 # Variables
 PREFIX ?= $(HOME)/.local
 BINDIR = $(PREFIX)/bin
+ETCDIR = $(PREFIX)/etc/pactopus
 SHAREDIR = $(PREFIX)/share/pactopus
 SHAREBIN = $(SHAREDIR)/bin
 SRCDIR = src
@@ -34,8 +35,14 @@ install: check
 	@echo "Installing pactopus to $(BINDIR)..."
 	@mkdir -p $(BINDIR)
 	@mkdir -p $(SHAREBIN)
+	@mkdir -p $(ETCDIR)
 	@cp $(SRCDIR)/$(EXECUTABLE) $(BINDIR)/$(EXECUTABLE)
 	@chmod +x $(BINDIR)/$(EXECUTABLE)
+	@echo "Installing configuration files to $(ETCDIR)..."
+	@cp packages.conf $(ETCDIR)/packages.conf
+	@if [ -f gnome-packages.conf ]; then \
+		cp gnome-packages.conf $(ETCDIR)/gnome-packages.conf; \
+	fi
 	@echo "Installing user scripts to $(SHAREBIN)..."
 	@for script in $(USERDIR)/*; do \
 		if [ -f "$$script" ]; then \
@@ -63,6 +70,8 @@ uninstall:
 	done
 	@echo "Removing $(SHAREDIR)..."
 	@rm -rf $(SHAREDIR)
+	@echo "Removing $(ETCDIR)..."
+	@rm -rf $(ETCDIR)
 	@echo "Uninstall complete!"
 
 # Test installation

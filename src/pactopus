@@ -230,6 +230,64 @@ gpgkey=https://packages.microsoft.com/keys/microsoft.asc" | sudo tee /etc/yum.re
             fi
             ;;
             
+        xh)
+            if ! command -v xh &> /dev/null; then
+                print_info "Installing xh HTTP client..."
+                
+                # Create local bin directory if it doesn't exist
+                mkdir -p "$HOME/.local/bin"
+                
+                # Detect architecture
+                ARCH=$(uname -m)
+                case "$ARCH" in
+                    x86_64)
+                        XH_ARCH="x86_64-unknown-linux-musl"
+                        ;;
+                    aarch64)
+                        XH_ARCH="aarch64-unknown-linux-musl"
+                        ;;
+                    *)
+                        print_error "Unsupported architecture: $ARCH"
+                        return 1
+                        ;;
+                esac
+                
+                # Download latest release
+                TEMP_DIR=$(mktemp -d)
+                cd "$TEMP_DIR"
+                
+                # Get latest version
+                LATEST_VERSION=$(curl -s https://api.github.com/repos/ducaale/xh/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+                
+                if [[ -z "$LATEST_VERSION" ]]; then
+                    print_error "Failed to determine latest xh version"
+                    cd - > /dev/null
+                    rm -rf "$TEMP_DIR"
+                    return 1
+                fi
+                
+                print_info "Downloading xh v${LATEST_VERSION}..."
+                curl -L -o xh.tar.gz "https://github.com/ducaale/xh/releases/download/v${LATEST_VERSION}/xh-v${LATEST_VERSION}-${XH_ARCH}.tar.gz"
+                
+                # Extract and install
+                tar -xzf xh.tar.gz
+                cp "xh-v${LATEST_VERSION}-${XH_ARCH}/xh" "$HOME/.local/bin/"
+                chmod +x "$HOME/.local/bin/xh"
+                
+                # Create symlink for xhs (HTTPS mode)
+                ln -sf "$HOME/.local/bin/xh" "$HOME/.local/bin/xhs"
+                
+                # Clean up
+                cd - > /dev/null
+                rm -rf "$TEMP_DIR"
+                
+                print_info "xh installed successfully to ~/.local/bin/"
+                print_info "Make sure ~/.local/bin is in your PATH"
+            else
+                print_info "xh already installed"
+            fi
+            ;;
+            
         brave-browser)
             if ! command -v brave-browser &> /dev/null; then
                 print_info "Installing Brave Browser..."
@@ -566,6 +624,7 @@ cmd_list() {
             azure-cli) cmd="az" ;;
             code) cmd="code" ;;
             eza) cmd="eza" ;;
+            xh) cmd="xh" ;;
             brave-browser) cmd="brave-browser" ;;
             gnome-shell-extension-pop-shell) 
                 [[ -d "$HOME/.local/share/gnome-shell/extensions/pop-shell@system76.com" ]] && echo "  ✓ $pkg" || echo "    $pkg"

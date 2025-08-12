@@ -1,0 +1,412 @@
+#!/bin/bash
+
+# Pactopus - Simple Package Manager for Fedora
+# Version: 2.0.0
+
+set -e
+
+# Configuration
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+CONFIG_FILE="$PROJECT_ROOT/packages.conf"
+STATE_DIR="$HOME/.config/pactopus"
+STATE_FILE="$STATE_DIR/state.conf"
+DOTFILES_DIR="$HOME/.dotfiles"
+DOTFILES_REPO="https://github.com/jdubba/dotfiles.git"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Print colored output
+print_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+print_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Ensure we're running on Fedora
+check_system() {
+    if ! command -v dnf &> /dev/null; then
+        print_error "This tool requires Fedora with dnf package manager"
+        exit 1
+    fi
+    
+    if [[ ! -f /etc/fedora-release ]]; then
+        print_warning "This tool is designed for Fedora. Proceed with caution."
+    fi
+}
+
+# Parse packages from config file
+get_packages() {
+    local packages=()
+    local special_packages=()
+    
+    while IFS= read -r line; do
+        # Skip comments and empty lines
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${line// }" ]] && continue
+        
+        # Check if it's a special package
+        if [[ "$line" =~ ^([^#]+)#[[:space:]]*SPECIAL ]]; then
+            package="${BASH_REMATCH[1]}"
+            package="${package%% *}"  # Trim trailing spaces
+            special_packages+=("$package")
+        else
+            # Regular package
+            package="${line%% *}"  # Get first word, trim trailing spaces
+            packages+=("$package")
+        fi
+    done < "$CONFIG_FILE"
+    
+    echo "REGULAR:${packages[*]}"
+    echo "SPECIAL:${special_packages[*]}"
+}
+
+# Install special packages with custom methods
+install_special_package() {
+    local package="$1"
+    
+    case "$package" in
+        starship)
+            if ! command -v starship &> /dev/null; then
+                print_info "Installing Starship prompt..."
+                curl -sS https://starship.rs/install.sh | sh -s -- -y
+            else
+                print_info "Starship already installed"
+            fi
+            ;;
+            
+        nvm)
+            if [[ ! -d "$HOME/.nvm" ]]; then
+                print_info "Installing NVM..."
+                curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
+            else
+                print_info "NVM already installed"
+            fi
+            ;;
+            
+        awscli2)
+            if ! command -v aws &> /dev/null; then
+                print_info "Installing AWS CLI v2..."
+                TEMP_DIR=$(mktemp -d)
+                cd "$TEMP_DIR"
+                curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+                unzip -q awscliv2.zip
+                sudo ./aws/install
+                cd - > /dev/null
+                rm -rf "$TEMP_DIR"
+            else
+                print_info "AWS CLI already installed"
+            fi
+            ;;
+            
+        azure-cli)
+            if ! command -v az &> /dev/null; then
+                print_info "Installing Azure CLI..."
+                sudo rpm --import https://packages.microsoft.com/keys/microsoft.asc
+                echo -e "[azure-cli]
+name=Azure CLI
+baseurl=https://packages.microsoft.com/yumrepos/azure-cli
+enabled=1
+gpgcheck=1
+gpgkey=https://packages.microsoft.com/keys/microsoft.asc" | sudo tee /etc/yum.repos.d/azure-cli.repo > /dev/null
+                sudo dnf install -y azure-cli
+            else
+                print_info "Azure CLI already installed"
+            fi
+            ;;
+            
+        code)
+            if ! command -v code &> /dev/null; then
+                print_info "Installing Visual Studio Code..."
+                sudo rpm --import https://packages.microsoft.com/keys/microsoft.asc
+                echo -e "[code]
+name=Visual Studio Code
+baseurl=https://packages.microsoft.com/yumrepos/vscode
+enabled=1
+gpgcheck=1
+gpgkey=https://packages.microsoft.com/keys/microsoft.asc" | sudo tee /etc/yum.repos.d/vscode.repo > /dev/null
+                sudo dnf install -y code
+            else
+                print_info "VS Code already installed"
+            fi
+            ;;
+            
+        brave-browser)
+            if ! command -v brave-browser &> /dev/null; then
+                print_info "Installing Brave Browser..."
+                sudo dnf config-manager --add-repo https://brave-browser-rpm-release.s3.brave.com/brave-browser.repo
+                sudo rpm --import https://brave-browser-rpm-release.s3.brave.com/brave-core.asc
+                sudo dnf install -y brave-browser
+            else
+                print_info "Brave Browser already installed"
+            fi
+            ;;
+            
+        *)
+            print_warning "Unknown special package: $package"
+            ;;
+    esac
+}
+
+# Install dotfiles
+install_dotfiles() {
+    print_info "Setting up dotfiles..."
+    
+    if [[ ! -d "$DOTFILES_DIR" ]]; then
+        print_info "Cloning dotfiles repository..."
+        git clone "$DOTFILES_REPO" "$DOTFILES_DIR"
+    else
+        print_info "Updating dotfiles repository..."
+        cd "$DOTFILES_DIR"
+        git pull
+        cd - > /dev/null
+    fi
+    
+    # Run dotfiles installation
+    if [[ -f "$DOTFILES_DIR/Makefile" ]]; then
+        print_info "Running dotfiles installation..."
+        cd "$DOTFILES_DIR"
+        make install
+        cd - > /dev/null
+    fi
+    
+    if command -v dotfiles &> /dev/null; then
+        dotfiles install
+    fi
+}
+
+# Save state
+save_state() {
+    mkdir -p "$STATE_DIR"
+    echo "last_install=$(date -Iseconds)" > "$STATE_FILE"
+    echo "version=2.0.0" >> "$STATE_FILE"
+}
+
+# Load state
+load_state() {
+    if [[ -f "$STATE_FILE" ]]; then
+        source "$STATE_FILE"
+        return 0
+    fi
+    return 1
+}
+
+# Install command
+cmd_install() {
+    check_system
+    
+    print_info "Starting Pactopus installation..."
+    
+    # Update system first
+    print_info "Updating package database..."
+    sudo dnf check-update || true
+    
+    # Parse packages
+    IFS=$'\n' read -d '' -r -a package_data < <(get_packages && printf '\0')
+    
+    for line in "${package_data[@]}"; do
+        if [[ "$line" =~ ^REGULAR:(.*)$ ]]; then
+            regular_packages="${BASH_REMATCH[1]}"
+        elif [[ "$line" =~ ^SPECIAL:(.*)$ ]]; then
+            special_packages="${BASH_REMATCH[1]}"
+        fi
+    done
+    
+    # Install regular packages
+    if [[ -n "$regular_packages" ]]; then
+        print_info "Installing packages via dnf..."
+        # Convert space-separated list to array
+        IFS=' ' read -ra pkgs <<< "$regular_packages"
+        
+        # Build list of packages that aren't already installed
+        to_install=()
+        for pkg in "${pkgs[@]}"; do
+            if ! rpm -q "$pkg" &>/dev/null; then
+                to_install+=("$pkg")
+            else
+                print_info "$pkg is already installed"
+            fi
+        done
+        
+        # Install missing packages
+        if [[ ${#to_install[@]} -gt 0 ]]; then
+            print_info "Installing: ${to_install[*]}"
+            sudo dnf install -y "${to_install[@]}"
+        fi
+    fi
+    
+    # Install special packages
+    if [[ -n "$special_packages" ]]; then
+        print_info "Installing special packages..."
+        IFS=' ' read -ra special_pkgs <<< "$special_packages"
+        for pkg in "${special_pkgs[@]}"; do
+            install_special_package "$pkg"
+        done
+    fi
+    
+    # Install dotfiles
+    install_dotfiles
+    
+    # Save state
+    save_state
+    
+    print_success "Installation complete!"
+}
+
+# Update command
+cmd_update() {
+    check_system
+    
+    print_info "Updating all packages..."
+    sudo dnf upgrade -y
+    
+    # Update dotfiles
+    install_dotfiles
+    
+    # Update state
+    save_state
+    
+    print_success "Update complete!"
+}
+
+# Status command
+cmd_status() {
+    if load_state; then
+        print_info "Pactopus Status:"
+        echo "  Last install: ${last_install:-unknown}"
+        echo "  Version: ${version:-unknown}"
+        echo "  Config file: $CONFIG_FILE"
+        echo "  State file: $STATE_FILE"
+    else
+        print_warning "No installation state found. Run 'pactopus install' first."
+    fi
+}
+
+# List command
+cmd_list() {
+    print_info "Available packages in $CONFIG_FILE:"
+    echo ""
+    
+    # Parse and display packages
+    IFS=$'\n' read -d '' -r -a package_data < <(get_packages && printf '\0')
+    
+    for line in "${package_data[@]}"; do
+        if [[ "$line" =~ ^REGULAR:(.*)$ ]]; then
+            regular_packages="${BASH_REMATCH[1]}"
+        elif [[ "$line" =~ ^SPECIAL:(.*)$ ]]; then
+            special_packages="${BASH_REMATCH[1]}"
+        fi
+    done
+    
+    echo "Standard packages (installed via dnf):"
+    IFS=' ' read -ra pkgs <<< "$regular_packages"
+    for pkg in "${pkgs[@]}"; do
+        if rpm -q "$pkg" &>/dev/null; then
+            echo "  ✓ $pkg"
+        else
+            echo "    $pkg"
+        fi
+    done
+    
+    echo ""
+    echo "Special packages (custom installation):"
+    IFS=' ' read -ra special_pkgs <<< "$special_packages"
+    for pkg in "${special_pkgs[@]}"; do
+        # Check if special package is installed
+        case "$pkg" in
+            starship) cmd="starship" ;;
+            nvm) [[ -d "$HOME/.nvm" ]] && echo "  ✓ $pkg" || echo "    $pkg"; continue ;;
+            awscli2) cmd="aws" ;;
+            azure-cli) cmd="az" ;;
+            code) cmd="code" ;;
+            brave-browser) cmd="brave-browser" ;;
+            *) cmd="$pkg" ;;
+        esac
+        
+        if command -v "$cmd" &>/dev/null; then
+            echo "  ✓ $pkg"
+        else
+            echo "    $pkg"
+        fi
+    done
+}
+
+# Help command
+cmd_help() {
+    cat << EOF
+Pactopus - Simple Package Manager for Fedora
+Version 2.0.0
+
+Usage: pactopus [command]
+
+Commands:
+  install    Install all packages from packages.conf
+  update     Update all installed packages
+  list       List all available packages
+  status     Show installation status
+  help       Show this help message
+  version    Show version information
+
+Configuration:
+  Package list: $CONFIG_FILE
+  State directory: $STATE_DIR
+
+Examples:
+  pactopus install    # Install all packages
+  pactopus update     # Update packages
+  pactopus list       # Show available packages
+  pactopus status     # Check installation status
+
+EOF
+}
+
+# Version command
+cmd_version() {
+    echo "Pactopus version 2.0.0"
+}
+
+# Main script
+main() {
+    case "${1:-help}" in
+        install)
+            cmd_install
+            ;;
+        update)
+            cmd_update
+            ;;
+        list)
+            cmd_list
+            ;;
+        status)
+            cmd_status
+            ;;
+        version)
+            cmd_version
+            ;;
+        help|--help|-h)
+            cmd_help
+            ;;
+        *)
+            print_error "Unknown command: $1"
+            cmd_help
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

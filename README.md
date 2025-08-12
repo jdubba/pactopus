@@ -1,104 +1,144 @@
 # Pactopus
 
-A cross-distribution personal package management DSC (Desired State Configuration) tool for standardizing tool sets across multiple Linux machines and environments.
+A simple package management tool for Fedora that installs a curated list of development and productivity tools.
 
 ## Overview
 
-Pactopus manages the installation and configuration of software packages across various Linux distributions, providing a consistent environment whether you're working on a remote server, minimal workstation, or full development machine. It uses Ansible playbooks to handle platform-specific variations while maintaining a unified interface.
+Pactopus automates the setup of a complete development environment on Fedora systems. It reads a simple list of packages from a configuration file and installs them all with a single command. It handles both standard DNF packages and special installations for tools that require custom setup.
 
 ## Features
 
-- **Cross-distribution support** - Works across 20+ Linux distributions including Debian, Ubuntu, Fedora, RHEL, Arch, Alpine, and more
-- **Composable package sets** - Define reusable groups of packages that can be combined (e.g., server-packages, development-packages)
-- **Platform-aware installation** - Automatically handles package name variations and chooses appropriate installation methods
-- **User tools management** - Install and manage custom scripts and utilities alongside system packages
-- **Dotfiles integration** - Automatically configures your environment using your dotfiles repository
-- **Idempotent operations** - Safe to run multiple times without side effects
+- **Single command installation** - Install all tools with `pactopus install`
+- **Simple configuration** - Just a flat list of packages in `packages.conf`
+- **Special package handling** - Automated setup for tools not in standard repos
+- **Dotfiles integration** - Automatically configures your environment
+- **State tracking** - Remembers installation status
+- **Idempotent** - Safe to run multiple times
 
-## Supported Platforms
-
-### Rolling Release Distributions
-- Arch Linux
-- Fedora Workstation/Server
-- CentOS Stream
-- OpenSUSE Tumbleweed
-
-### Stable Release Distributions
-- Debian and derivatives (Ubuntu, Mint, Pop!_OS)
-- RHEL and derivatives (AlmaLinux, Rocky Linux)
-- Amazon Linux 2
-- Alpine Linux
-- OpenSUSE
-
-## Installation
+## Quick Start
 
 ```bash
 # Clone the repository
 git clone https://github.com/yourusername/pactopus.git
 cd pactopus
 
-# Build and install
-make
+# Install pactopus
 make install
+
+# Install all packages
+pactopus install
 ```
 
 ## Usage
 
 ```bash
-# Display help
-pactopus help
-
-# Install package sets
-pactopus install server-packages development-packages
-
-# Install individual packages
-pactopus install neovim docker
-
-# Update all installed packages
-pactopus update
+pactopus install    # Install all packages from packages.conf
+pactopus update     # Update all installed packages
+pactopus list       # Show all packages and their status
+pactopus status     # Show installation status
+pactopus help       # Display help
 ```
 
-## Package Sets
+## What Gets Installed
 
-Pactopus includes predefined package sets for common use cases:
+The default `packages.conf` includes:
 
-- **server-packages** - Essential tools for remote servers (git, neovim, ripgrep, etc.)
-- **cloud-packages** - Cloud provider CLIs (AWS, Azure)
-- **development-packages** - Development tools and compilers
-- **basic-workstation** - Desktop essentials (includes server-packages)
-- **full-workstation** - Complete development environment
+**Core Tools**: git, neovim, vim, curl, wget, make, tmux, zsh  
+**Search & Files**: ripgrep, fzf, fd-find, bat, eza, tree  
+**Development**: gcc, nodejs, python3, golang, rust, docker, podman  
+**Cloud Tools**: terraform, ansible, kubectl, AWS CLI, Azure CLI  
+**Desktop Apps**: kitty, firefox, VS Code, Brave Browser  
+**Utilities**: htop, tldr, lazygit, jq, pass  
 
-See [docs/pactopus-initial-package-lists.md](docs/pactopus-initial-package-lists.md) for the complete list.
+See [packages.conf](packages.conf) for the complete list.
+
+## Customization
+
+To customize what gets installed, simply edit `packages.conf`:
+
+```bash
+# packages.conf
+git
+neovim
+docker
+nodejs
+starship      # SPECIAL - requires custom installation
+```
+
+- Add one package per line
+- Lines starting with `#` are comments
+- Add `# SPECIAL` for packages needing custom installation
+
+## Special Packages
+
+Some tools require custom installation methods:
+
+| Package | Installation Method |
+|---------|-------------------|
+| starship | Official installer script |
+| nvm | Git clone and setup |
+| awscli2 | Direct download from AWS |
+| azure-cli | Microsoft repository |
+| code | Microsoft repository |
+| brave-browser | Brave repository |
+
+## Dotfiles Integration
+
+Pactopus automatically:
+1. Clones https://github.com/jdubba/dotfiles/ to `~/.dotfiles`
+2. Runs the dotfiles installation
+3. Configures your shell and tools
+
+## Requirements
+
+- Fedora Workstation 39 or later
+- sudo access
+- Internet connection
+
+## File Locations
+
+- **Config**: `packages.conf` in the project directory
+- **State**: `~/.config/pactopus/state.conf`
+- **Dotfiles**: `~/.dotfiles/`
+- **User scripts**: Installed to `~/.local/bin/`
 
 ## Development
 
-See [docs/release-v1.0.0.md](docs/release-v1.0.0.md) for the implementation roadmap and progress tracking.
-
-### Project Structure
-
-```
-/
-├── src/
-│   ├── user/          # User-defined scripts and tools
-│   └── playbooks/     # Ansible playbooks for package installation
-├── docs/              # Project documentation
-├── tests/             # Test suite
-└── Makefile          # Build and installation scripts
-```
-
-### Testing
-
 ```bash
-# Run unit tests
-make test
+# Check syntax
+make check
 
-# Lint code
+# Lint with shellcheck
 make lint
+
+# Uninstall
+make uninstall
 ```
+
+## Implementation
+
+Pactopus is a simple bash script (~400 lines) that:
+1. Reads packages from `packages.conf`
+2. Separates regular vs special packages
+3. Installs regular packages via `dnf`
+4. Runs custom installers for special packages
+5. Sets up dotfiles
+6. Tracks state for updates
+
+## Future Plans
+
+- Add more special package installers
+- Support for removing packages
+- Backup/restore of package lists
+- Multiple configuration profiles
 
 ## Contributing
 
-Contributions are welcome! Please ensure all tests pass and code is properly linted before submitting pull requests.
+To add new packages:
+1. Add to `packages.conf`
+2. If it needs special installation, mark with `# SPECIAL`
+3. Add installation logic to `install_special_package()` function
+4. Test on fresh Fedora system
 
 ## License
 

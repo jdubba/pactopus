@@ -11,7 +11,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 CONFIG_FILE="$PROJECT_ROOT/packages.conf"
 STATE_DIR="$HOME/.config/pactopus"
 STATE_FILE="$STATE_DIR/state.conf"
-DOTFILES_DIR="$HOME/.dotfiles"
+DOTFILES_DIR="$HOME/source/dotfiles"
 DOTFILES_REPO="https://github.com/jdubba/dotfiles.git"
 
 # Colors for output

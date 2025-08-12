@@ -14,6 +14,8 @@ STATE_DIR="$HOME/.config/pactopus"
 STATE_FILE="$STATE_DIR/state.conf"
 DOTFILES_DIR="$HOME/source/dotfiles"
 DOTFILES_REPO="https://github.com/jdubba/dotfiles.git"
+UTILITIES_DIR="$HOME/source/utilities"
+UTILITIES_REPO="https://github.com/jdubba/utilities.git"
 
 # Colors for output
 RED='\033[0;31m'
@@ -356,6 +358,31 @@ install_dotfiles() {
     fi
 }
 
+# Install utilities
+install_utilities() {
+    print_info "Setting up personal utilities..."
+    
+    if [[ ! -d "$UTILITIES_DIR" ]]; then
+        print_info "Cloning utilities repository..."
+        git clone "$UTILITIES_REPO" "$UTILITIES_DIR"
+    else
+        print_info "Updating utilities repository..."
+        cd "$UTILITIES_DIR"
+        git pull
+        cd - > /dev/null
+    fi
+    
+    # Run utilities installation
+    if [[ -f "$UTILITIES_DIR/Makefile" ]]; then
+        print_info "Running utilities installation..."
+        cd "$UTILITIES_DIR"
+        make install
+        cd - > /dev/null
+    else
+        print_warning "No Makefile found in utilities repository"
+    fi
+}
+
 # Save state
 save_state() {
     mkdir -p "$STATE_DIR"
@@ -473,6 +500,9 @@ cmd_install() {
     # Install dotfiles
     install_dotfiles
     
+    # Install utilities
+    install_utilities
+    
     # Save state
     save_state
     
@@ -566,6 +596,9 @@ cmd_update() {
     
     # Update dotfiles
     install_dotfiles
+    
+    # Update utilities
+    install_utilities
     
     # Update state
     save_state

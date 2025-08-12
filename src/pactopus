@@ -146,6 +146,41 @@ gpgkey=https://packages.microsoft.com/keys/microsoft.asc" | sudo tee /etc/yum.re
             fi
             ;;
             
+        eza)
+            if ! command -v eza &> /dev/null; then
+                print_info "Installing eza from source using cargo..."
+                
+                # Ensure cargo is installed
+                if ! command -v cargo &> /dev/null; then
+                    print_error "Cargo is required to build eza. Please install rust/cargo first."
+                    return 1
+                fi
+                
+                # Create local bin directory if it doesn't exist
+                mkdir -p "$HOME/.local/bin"
+                
+                # Build and install eza
+                TEMP_DIR=$(mktemp -d)
+                cd "$TEMP_DIR"
+                git clone https://github.com/eza-community/eza.git
+                cd eza
+                cargo build --release
+                
+                # Copy binary to ~/.local/bin
+                cp target/release/eza "$HOME/.local/bin/"
+                chmod +x "$HOME/.local/bin/eza"
+                
+                # Clean up
+                cd - > /dev/null
+                rm -rf "$TEMP_DIR"
+                
+                print_info "eza installed successfully to ~/.local/bin/"
+                print_info "Make sure ~/.local/bin is in your PATH"
+            else
+                print_info "eza already installed"
+            fi
+            ;;
+            
         brave-browser)
             if ! command -v brave-browser &> /dev/null; then
                 print_info "Installing Brave Browser..."

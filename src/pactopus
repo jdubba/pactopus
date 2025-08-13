@@ -796,6 +796,44 @@ cmd_install() {
     
     # Print summary
     print_summary
+    
+    # Run full system update
+    echo ""
+    print_info "Running full system update to ensure all packages are up to date..."
+    if sudo dnf upgrade -y 2>/dev/null; then
+        print_success "System update completed successfully"
+    else
+        print_warning "System update encountered issues - please review any errors above"
+    fi
+    
+    # Check if kernel was updated
+    KERNEL_UPDATED=false
+    if sudo dnf history info last | grep -q "kernel\|kernel-core\|kernel-modules" 2>/dev/null; then
+        KERNEL_UPDATED=true
+    fi
+    
+    # Prompt for reboot
+    echo ""
+    if [[ "$KERNEL_UPDATED" == "true" ]]; then
+        print_warning "Kernel updates were installed. A reboot is required to use the new kernel."
+    else
+        print_info "Installation complete. A reboot is recommended to ensure all updates are applied."
+    fi
+    
+    echo ""
+    read -p "Would you like to reboot now? (y/N): " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        print_info "Rebooting system in 5 seconds..."
+        print_info "Press Ctrl+C to cancel"
+        sleep 5
+        sudo systemctl reboot
+    else
+        print_info "Reboot skipped. Please remember to reboot at your convenience."
+        if [[ "$KERNEL_UPDATED" == "true" ]]; then
+            print_warning "Note: System is still running the old kernel until you reboot."
+        fi
+    fi
 }
 
 # Update command

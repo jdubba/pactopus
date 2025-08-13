@@ -3,7 +3,7 @@
 # Pactopus - Simple Package Manager for Fedora
 # Version: 2.0.0
 
-set -e
+# Removed set -e to allow continuing on individual failures
 
 # Configuration
 CONFIG_DIR="$HOME/.local/etc/pactopus"
@@ -15,6 +15,11 @@ DOTFILES_DIR="$HOME/source/dotfiles"
 DOTFILES_REPO="https://github.com/jdubba/dotfiles.git"
 UTILITIES_DIR="$HOME/source/utilities"
 UTILITIES_REPO="https://github.com/jdubba/utilities.git"
+
+# Installation tracking arrays
+declare -a SUCCESSFUL_INSTALLS=()
+declare -a FAILED_INSTALLS=()
+declare -a SKIPPED_INSTALLS=()
 
 # Colors for output
 RED='\033[0;31m'
@@ -38,6 +43,70 @@ print_warning() {
 
 print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Track installation results
+track_success() {
+    local package="$1"
+    SUCCESSFUL_INSTALLS+=("$package")
+}
+
+track_failure() {
+    local package="$1"
+    local reason="${2:-Unknown error}"
+    FAILED_INSTALLS+=("$package: $reason")
+}
+
+track_skipped() {
+    local package="$1"
+    local reason="${2:-Already installed}"
+    SKIPPED_INSTALLS+=("$package: $reason")
+}
+
+# Print installation summary
+print_summary() {
+    echo ""
+    echo -e "${BLUE}============================================${NC}"
+    echo -e "${BLUE}        INSTALLATION SUMMARY${NC}"
+    echo -e "${BLUE}============================================${NC}"
+    echo ""
+    
+    local total=$((${#SUCCESSFUL_INSTALLS[@]} + ${#FAILED_INSTALLS[@]} + ${#SKIPPED_INSTALLS[@]}))
+    
+    echo -e "Total packages processed: ${total}"
+    echo -e "${GREEN}✓ Successful: ${#SUCCESSFUL_INSTALLS[@]}${NC}"
+    echo -e "${YELLOW}⊝ Skipped: ${#SKIPPED_INSTALLS[@]}${NC}"
+    echo -e "${RED}✗ Failed: ${#FAILED_INSTALLS[@]}${NC}"
+    echo ""
+    
+    if [[ ${#SUCCESSFUL_INSTALLS[@]} -gt 0 ]]; then
+        echo -e "${GREEN}Successfully installed:${NC}"
+        for item in "${SUCCESSFUL_INSTALLS[@]}"; do
+            echo "  ✓ $item"
+        done
+        echo ""
+    fi
+    
+    if [[ ${#SKIPPED_INSTALLS[@]} -gt 0 ]]; then
+        echo -e "${YELLOW}Skipped packages:${NC}"
+        for item in "${SKIPPED_INSTALLS[@]}"; do
+            echo "  ⊝ $item"
+        done
+        echo ""
+    fi
+    
+    if [[ ${#FAILED_INSTALLS[@]} -gt 0 ]]; then
+        echo -e "${RED}Failed installations:${NC}"
+        for item in "${FAILED_INSTALLS[@]}"; do
+            echo "  ✗ $item"
+        done
+        echo ""
+        echo -e "${YELLOW}Please review the failed installations above and try again manually if needed.${NC}"
+    else
+        echo -e "${GREEN}All installations completed successfully!${NC}"
+    fi
+    
+    echo -e "${BLUE}============================================${NC}"
 }
 
 # Ensure we're running on Fedora
@@ -141,9 +210,16 @@ install_special_package() {
         starship)
             if ! command -v starship &> /dev/null; then
                 print_info "Installing Starship prompt..."
-                curl -sS https://starship.rs/install.sh | sh -s -- -y
+                if curl -sS https://starship.rs/install.sh | sh -s -- -y 2>/dev/null; then
+                    track_success "$package"
+                    print_success "Starship installed successfully"
+                else
+                    track_failure "$package" "Failed to download or install Starship"
+                    print_error "Failed to install Starship"
+                fi
             else
                 print_info "Starship already installed"
+                track_skipped "$package"
             fi
             ;;
             
@@ -153,13 +229,20 @@ install_special_package() {
                 # Fetch the latest version from GitHub releases
                 NVM_LATEST=$(curl -s https://api.github.com/repos/nvm-sh/nvm/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
                 if [[ -z "$NVM_LATEST" ]]; then
-                    print_error "Failed to fetch latest NVM version, using fallback"
+                    print_warning "Failed to fetch latest NVM version, using fallback"
                     NVM_LATEST="v0.40.1"  # Fallback to a known recent version
                 fi
                 print_info "Installing NVM version $NVM_LATEST..."
-                curl -o- "https://raw.githubusercontent.com/nvm-sh/nvm/$NVM_LATEST/install.sh" | bash
+                if curl -o- "https://raw.githubusercontent.com/nvm-sh/nvm/$NVM_LATEST/install.sh" 2>/dev/null | bash 2>/dev/null; then
+                    track_success "$package"
+                    print_success "NVM installed successfully"
+                else
+                    track_failure "$package" "Failed to install NVM version $NVM_LATEST"
+                    print_error "Failed to install NVM"
+                fi
             else
                 print_info "NVM already installed"
+                track_skipped "$package"
             fi
             ;;
             
@@ -167,46 +250,59 @@ install_special_package() {
             if ! command -v aws &> /dev/null; then
                 print_info "Installing AWS CLI v2..."
                 TEMP_DIR=$(mktemp -d)
-                cd "$TEMP_DIR"
-                curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-                unzip -q awscliv2.zip
-                sudo ./aws/install
+                (
+                    cd "$TEMP_DIR"
+                    if curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" 2>/dev/null && \
+                       unzip -q awscliv2.zip && \
+                       sudo ./aws/install 2>/dev/null; then
+                        track_success "$package"
+                        print_success "AWS CLI v2 installed successfully"
+                    else
+                        track_failure "$package" "Failed to download or install AWS CLI v2"
+                        print_error "Failed to install AWS CLI v2"
+                    fi
+                )
                 cd - > /dev/null
                 rm -rf "$TEMP_DIR"
             else
                 print_info "AWS CLI already installed"
+                track_skipped "$package"
             fi
             ;;
             
         azure-cli)
             if ! command -v az &> /dev/null; then
                 print_info "Installing Azure CLI..."
-                sudo rpm --import https://packages.microsoft.com/keys/microsoft.asc
-                echo -e "[azure-cli]
-name=Azure CLI
-baseurl=https://packages.microsoft.com/yumrepos/azure-cli
-enabled=1
-gpgcheck=1
-gpgkey=https://packages.microsoft.com/keys/microsoft.asc" | sudo tee /etc/yum.repos.d/azure-cli.repo > /dev/null
-                sudo dnf install -y azure-cli
+                if sudo rpm --import https://packages.microsoft.com/keys/microsoft.asc 2>/dev/null && \
+                   echo -e "[azure-cli]\nname=Azure CLI\nbaseurl=https://packages.microsoft.com/yumrepos/azure-cli\nenabled=1\ngpgcheck=1\ngpgkey=https://packages.microsoft.com/keys/microsoft.asc" | sudo tee /etc/yum.repos.d/azure-cli.repo > /dev/null && \
+                   sudo dnf install -y azure-cli 2>/dev/null; then
+                    track_success "$package"
+                    print_success "Azure CLI installed successfully"
+                else
+                    track_failure "$package" "Failed to configure repository or install Azure CLI"
+                    print_error "Failed to install Azure CLI"
+                fi
             else
                 print_info "Azure CLI already installed"
+                track_skipped "$package"
             fi
             ;;
             
         code)
             if ! command -v code &> /dev/null; then
                 print_info "Installing Visual Studio Code..."
-                sudo rpm --import https://packages.microsoft.com/keys/microsoft.asc
-                echo -e "[code]
-name=Visual Studio Code
-baseurl=https://packages.microsoft.com/yumrepos/vscode
-enabled=1
-gpgcheck=1
-gpgkey=https://packages.microsoft.com/keys/microsoft.asc" | sudo tee /etc/yum.repos.d/vscode.repo > /dev/null
-                sudo dnf install -y code
+                if sudo rpm --import https://packages.microsoft.com/keys/microsoft.asc 2>/dev/null && \
+                   echo -e "[code]\nname=Visual Studio Code\nbaseurl=https://packages.microsoft.com/yumrepos/vscode\nenabled=1\ngpgcheck=1\ngpgkey=https://packages.microsoft.com/keys/microsoft.asc" | sudo tee /etc/yum.repos.d/vscode.repo > /dev/null && \
+                   sudo dnf install -y code 2>/dev/null; then
+                    track_success "$package"
+                    print_success "VS Code installed successfully"
+                else
+                    track_failure "$package" "Failed to configure repository or install VS Code"
+                    print_error "Failed to install VS Code"
+                fi
             else
                 print_info "VS Code already installed"
+                track_skipped "$package"
             fi
             ;;
             
@@ -216,32 +312,35 @@ gpgkey=https://packages.microsoft.com/keys/microsoft.asc" | sudo tee /etc/yum.re
                 
                 # Ensure cargo is installed
                 if ! command -v cargo &> /dev/null; then
+                    track_failure "$package" "Cargo is required but not installed"
                     print_error "Cargo is required to build eza. Please install rust/cargo first."
-                    return 1
+                else
+                    # Create local bin directory if it doesn't exist
+                    mkdir -p "$HOME/.local/bin"
+                    
+                    # Build and install eza
+                    TEMP_DIR=$(mktemp -d)
+                    (
+                        cd "$TEMP_DIR"
+                        if git clone https://github.com/eza-community/eza.git 2>/dev/null && \
+                           cd eza && \
+                           cargo build --release 2>/dev/null && \
+                           cp target/release/eza "$HOME/.local/bin/" && \
+                           chmod +x "$HOME/.local/bin/eza"; then
+                            track_success "$package"
+                            print_success "eza installed successfully to ~/.local/bin/"
+                            print_info "Make sure ~/.local/bin is in your PATH"
+                        else
+                            track_failure "$package" "Failed to build or install eza"
+                            print_error "Failed to install eza"
+                        fi
+                    )
+                    cd - > /dev/null
+                    rm -rf "$TEMP_DIR"
                 fi
-                
-                # Create local bin directory if it doesn't exist
-                mkdir -p "$HOME/.local/bin"
-                
-                # Build and install eza
-                TEMP_DIR=$(mktemp -d)
-                cd "$TEMP_DIR"
-                git clone https://github.com/eza-community/eza.git
-                cd eza
-                cargo build --release
-                
-                # Copy binary to ~/.local/bin
-                cp target/release/eza "$HOME/.local/bin/"
-                chmod +x "$HOME/.local/bin/eza"
-                
-                # Clean up
-                cd - > /dev/null
-                rm -rf "$TEMP_DIR"
-                
-                print_info "eza installed successfully to ~/.local/bin/"
-                print_info "Make sure ~/.local/bin is in your PATH"
             else
                 print_info "eza already installed"
+                track_skipped "$package"
             fi
             ;;
             
@@ -262,55 +361,62 @@ gpgkey=https://packages.microsoft.com/keys/microsoft.asc" | sudo tee /etc/yum.re
                         XH_ARCH="aarch64-unknown-linux-musl"
                         ;;
                     *)
+                        track_failure "$package" "Unsupported architecture: $ARCH"
                         print_error "Unsupported architecture: $ARCH"
-                        return 1
+                        return 0
                         ;;
                 esac
                 
                 # Download latest release
                 TEMP_DIR=$(mktemp -d)
-                cd "$TEMP_DIR"
-                
-                # Get latest version
-                LATEST_VERSION=$(curl -s https://api.github.com/repos/ducaale/xh/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
-                
-                if [[ -z "$LATEST_VERSION" ]]; then
-                    print_error "Failed to determine latest xh version"
-                    cd - > /dev/null
-                    rm -rf "$TEMP_DIR"
-                    return 1
-                fi
-                
-                print_info "Downloading xh v${LATEST_VERSION}..."
-                curl -L -o xh.tar.gz "https://github.com/ducaale/xh/releases/download/v${LATEST_VERSION}/xh-v${LATEST_VERSION}-${XH_ARCH}.tar.gz"
-                
-                # Extract and install
-                tar -xzf xh.tar.gz
-                cp "xh-v${LATEST_VERSION}-${XH_ARCH}/xh" "$HOME/.local/bin/"
-                chmod +x "$HOME/.local/bin/xh"
-                
-                # Create symlink for xhs (HTTPS mode)
-                ln -sf "$HOME/.local/bin/xh" "$HOME/.local/bin/xhs"
-                
-                # Clean up
+                (
+                    cd "$TEMP_DIR"
+                    
+                    # Get latest version
+                    LATEST_VERSION=$(curl -s https://api.github.com/repos/ducaale/xh/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+                    
+                    if [[ -z "$LATEST_VERSION" ]]; then
+                        track_failure "$package" "Failed to determine latest xh version"
+                        print_error "Failed to determine latest xh version"
+                    else
+                        print_info "Downloading xh v${LATEST_VERSION}..."
+                        if curl -L -o xh.tar.gz "https://github.com/ducaale/xh/releases/download/v${LATEST_VERSION}/xh-v${LATEST_VERSION}-${XH_ARCH}.tar.gz" 2>/dev/null && \
+                           tar -xzf xh.tar.gz 2>/dev/null && \
+                           cp "xh-v${LATEST_VERSION}-${XH_ARCH}/xh" "$HOME/.local/bin/" && \
+                           chmod +x "$HOME/.local/bin/xh" && \
+                           ln -sf "$HOME/.local/bin/xh" "$HOME/.local/bin/xhs"; then
+                            track_success "$package"
+                            print_success "xh installed successfully to ~/.local/bin/"
+                            print_info "Make sure ~/.local/bin is in your PATH"
+                        else
+                            track_failure "$package" "Failed to download or install xh"
+                            print_error "Failed to install xh"
+                        fi
+                    fi
+                )
                 cd - > /dev/null
                 rm -rf "$TEMP_DIR"
-                
-                print_info "xh installed successfully to ~/.local/bin/"
-                print_info "Make sure ~/.local/bin is in your PATH"
             else
                 print_info "xh already installed"
+                track_skipped "$package"
             fi
             ;;
             
         brave-browser)
             if ! command -v brave-browser &> /dev/null; then
                 print_info "Installing Brave Browser..."
-                sudo dnf config-manager --add-repo https://brave-browser-rpm-release.s3.brave.com/brave-browser.repo
-                sudo rpm --import https://brave-browser-rpm-release.s3.brave.com/brave-core.asc
-                sudo dnf install -y brave-browser
+                if sudo dnf config-manager --add-repo https://brave-browser-rpm-release.s3.brave.com/brave-browser.repo 2>/dev/null && \
+                   sudo rpm --import https://brave-browser-rpm-release.s3.brave.com/brave-core.asc 2>/dev/null && \
+                   sudo dnf install -y brave-browser 2>/dev/null; then
+                    track_success "$package"
+                    print_success "Brave Browser installed successfully"
+                else
+                    track_failure "$package" "Failed to configure repository or install Brave Browser"
+                    print_error "Failed to install Brave Browser"
+                fi
             else
                 print_info "Brave Browser already installed"
+                track_skipped "$package"
             fi
             ;;
             
@@ -318,27 +424,37 @@ gpgkey=https://packages.microsoft.com/keys/microsoft.asc" | sudo tee /etc/yum.re
             if [[ ! -d "$HOME/.local/share/gnome-shell/extensions/pop-shell@system76.com" ]]; then
                 print_info "Installing Pop Shell GNOME extension..."
                 
-                # Install dependencies
-                sudo dnf install -y gnome-shell-extension-native-window-placement xprop
-                
-                # Clone and build Pop Shell
-                TEMP_DIR=$(mktemp -d)
-                cd "$TEMP_DIR"
-                git clone https://github.com/pop-os/shell.git
-                cd shell
-                make local-install
-                
-                # Clean up
-                cd - > /dev/null
-                rm -rf "$TEMP_DIR"
-                
-                print_info "Pop Shell installed. Please restart GNOME Shell (Alt+F2, then 'r') and enable in Extensions app"
+                # Install dependencies first
+                if ! sudo dnf install -y gnome-shell-extension-native-window-placement xprop 2>/dev/null; then
+                    track_failure "$package" "Failed to install dependencies"
+                    print_error "Failed to install Pop Shell dependencies"
+                else
+                    # Clone and build Pop Shell
+                    TEMP_DIR=$(mktemp -d)
+                    (
+                        cd "$TEMP_DIR"
+                        if git clone https://github.com/pop-os/shell.git 2>/dev/null && \
+                           cd shell && \
+                           make local-install 2>/dev/null; then
+                            track_success "$package"
+                            print_success "Pop Shell installed successfully"
+                            print_info "Please restart GNOME Shell (Alt+F2, then 'r') and enable in Extensions app"
+                        else
+                            track_failure "$package" "Failed to build or install Pop Shell"
+                            print_error "Failed to install Pop Shell"
+                        fi
+                    )
+                    cd - > /dev/null
+                    rm -rf "$TEMP_DIR"
+                fi
             else
                 print_info "Pop Shell already installed"
+                track_skipped "$package"
             fi
             ;;
             
         *)
+            track_failure "$package" "Unknown special package"
             print_warning "Unknown special package: $package"
             ;;
     esac
@@ -350,24 +466,46 @@ install_dotfiles() {
     
     if [[ ! -d "$DOTFILES_DIR" ]]; then
         print_info "Cloning dotfiles repository..."
-        git clone "$DOTFILES_REPO" "$DOTFILES_DIR"
+        if git clone "$DOTFILES_REPO" "$DOTFILES_DIR" 2>/dev/null; then
+            print_success "Dotfiles repository cloned successfully"
+        else
+            track_failure "dotfiles" "Failed to clone repository"
+            print_error "Failed to clone dotfiles repository"
+            return 0
+        fi
     else
         print_info "Updating dotfiles repository..."
-        cd "$DOTFILES_DIR"
-        git pull
-        cd - > /dev/null
+        (
+            cd "$DOTFILES_DIR"
+            if git pull 2>/dev/null; then
+                print_success "Dotfiles repository updated successfully"
+            else
+                print_warning "Failed to update dotfiles repository"
+            fi
+        )
     fi
     
     # Run dotfiles installation
     if [[ -f "$DOTFILES_DIR/Makefile" ]]; then
         print_info "Running dotfiles installation..."
-        cd "$DOTFILES_DIR"
-        make install
-        cd - > /dev/null
+        (
+            cd "$DOTFILES_DIR"
+            if make install 2>/dev/null; then
+                track_success "dotfiles"
+                print_success "Dotfiles installed successfully"
+            else
+                track_failure "dotfiles" "Make install failed"
+                print_error "Failed to run dotfiles installation"
+            fi
+        )
     fi
     
     if command -v dotfiles &> /dev/null; then
-        dotfiles install
+        if dotfiles install 2>/dev/null; then
+            print_success "Dotfiles command executed successfully"
+        else
+            print_warning "Dotfiles command failed"
+        fi
     fi
 }
 
@@ -377,20 +515,38 @@ install_utilities() {
     
     if [[ ! -d "$UTILITIES_DIR" ]]; then
         print_info "Cloning utilities repository..."
-        git clone "$UTILITIES_REPO" "$UTILITIES_DIR"
+        if git clone "$UTILITIES_REPO" "$UTILITIES_DIR" 2>/dev/null; then
+            print_success "Utilities repository cloned successfully"
+        else
+            track_failure "utilities" "Failed to clone repository"
+            print_error "Failed to clone utilities repository"
+            return 0
+        fi
     else
         print_info "Updating utilities repository..."
-        cd "$UTILITIES_DIR"
-        git pull
-        cd - > /dev/null
+        (
+            cd "$UTILITIES_DIR"
+            if git pull 2>/dev/null; then
+                print_success "Utilities repository updated successfully"
+            else
+                print_warning "Failed to update utilities repository"
+            fi
+        )
     fi
     
     # Run utilities installation
     if [[ -f "$UTILITIES_DIR/Makefile" ]]; then
         print_info "Running utilities installation..."
-        cd "$UTILITIES_DIR"
-        make install
-        cd - > /dev/null
+        (
+            cd "$UTILITIES_DIR"
+            if make install 2>/dev/null; then
+                track_success "utilities"
+                print_success "Utilities installed successfully"
+            else
+                track_failure "utilities" "Make install failed"
+                print_error "Failed to run utilities installation"
+            fi
+        )
     else
         print_warning "No Makefile found in utilities repository"
     fi
@@ -415,6 +571,11 @@ load_state() {
 # Install command
 cmd_install() {
     check_system
+    
+    # Reset tracking arrays
+    SUCCESSFUL_INSTALLS=()
+    FAILED_INSTALLS=()
+    SKIPPED_INSTALLS=()
     
     print_info "Starting Pactopus installation..."
     
@@ -441,21 +602,22 @@ cmd_install() {
         # Convert space-separated list to array
         IFS=' ' read -ra pkgs <<< "$regular_packages"
         
-        # Build list of packages that aren't already installed
-        to_install=()
+        # Process each package individually
         for pkg in "${pkgs[@]}"; do
             if ! rpm -q "$pkg" &>/dev/null; then
-                to_install+=("$pkg")
+                print_info "Installing $pkg..."
+                if sudo dnf install -y "$pkg" 2>/dev/null; then
+                    track_success "$pkg"
+                    print_success "$pkg installed successfully"
+                else
+                    track_failure "$pkg" "DNF installation failed"
+                    print_error "Failed to install $pkg"
+                fi
             else
                 print_info "$pkg is already installed"
+                track_skipped "$pkg"
             fi
         done
-        
-        # Install missing packages
-        if [[ ${#to_install[@]} -gt 0 ]]; then
-            print_info "Installing: ${to_install[*]}"
-            sudo dnf install -y "${to_install[@]}"
-        fi
     fi
     
     # Install GNOME regular packages if in GNOME environment
@@ -477,19 +639,21 @@ cmd_install() {
         if [[ -n "$gnome_regular_packages" ]]; then
             IFS=' ' read -ra gnome_pkgs <<< "$gnome_regular_packages"
             
-            gnome_to_install=()
             for pkg in "${gnome_pkgs[@]}"; do
                 if ! rpm -q "$pkg" &>/dev/null; then
-                    gnome_to_install+=("$pkg")
+                    print_info "Installing GNOME package $pkg..."
+                    if sudo dnf install -y "$pkg" 2>/dev/null; then
+                        track_success "$pkg"
+                        print_success "$pkg installed successfully"
+                    else
+                        track_failure "$pkg" "DNF installation failed"
+                        print_error "Failed to install $pkg"
+                    fi
                 else
                     print_info "$pkg is already installed"
+                    track_skipped "$pkg"
                 fi
             done
-            
-            if [[ ${#gnome_to_install[@]} -gt 0 ]]; then
-                print_info "Installing GNOME packages: ${gnome_to_install[*]}"
-                sudo dnf install -y "${gnome_to_install[@]}"
-            fi
         fi
     else
         print_info "GNOME desktop not detected. Skipping GNOME-specific packages."
@@ -522,12 +686,18 @@ cmd_install() {
     # Save state
     save_state
     
-    print_success "Installation complete!"
+    # Print summary
+    print_summary
 }
 
 # Update command
 cmd_update() {
     check_system
+    
+    # Reset tracking arrays for update
+    SUCCESSFUL_INSTALLS=()
+    FAILED_INSTALLS=()
+    SKIPPED_INSTALLS=()
     
     print_info "Updating all packages..."
     sudo dnf upgrade -y
@@ -551,17 +721,18 @@ cmd_update() {
     # Check and install missing regular packages
     if [[ -n "$regular_packages" ]]; then
         IFS=' ' read -ra pkgs <<< "$regular_packages"
-        to_install=()
         for pkg in "${pkgs[@]}"; do
             if ! rpm -q "$pkg" &>/dev/null; then
-                to_install+=("$pkg")
+                print_info "Installing missing package $pkg..."
+                if sudo dnf install -y "$pkg" 2>/dev/null; then
+                    track_success "$pkg"
+                    print_success "$pkg installed successfully"
+                else
+                    track_failure "$pkg" "DNF installation failed"
+                    print_error "Failed to install $pkg"
+                fi
             fi
         done
-        
-        if [[ ${#to_install[@]} -gt 0 ]]; then
-            print_info "Installing missing packages: ${to_install[*]}"
-            sudo dnf install -y "${to_install[@]}"
-        fi
     fi
     
     # Check GNOME regular packages if in GNOME environment
@@ -582,17 +753,18 @@ cmd_update() {
         # Check and install missing GNOME packages
         if [[ -n "$gnome_regular_packages" ]]; then
             IFS=' ' read -ra gnome_pkgs <<< "$gnome_regular_packages"
-            gnome_to_install=()
             for pkg in "${gnome_pkgs[@]}"; do
                 if ! rpm -q "$pkg" &>/dev/null; then
-                    gnome_to_install+=("$pkg")
+                    print_info "Installing missing GNOME package $pkg..."
+                    if sudo dnf install -y "$pkg" 2>/dev/null; then
+                        track_success "$pkg"
+                        print_success "$pkg installed successfully"
+                    else
+                        track_failure "$pkg" "DNF installation failed"
+                        print_error "Failed to install $pkg"
+                    fi
                 fi
             done
-            
-            if [[ ${#gnome_to_install[@]} -gt 0 ]]; then
-                print_info "Installing missing GNOME packages: ${gnome_to_install[*]}"
-                sudo dnf install -y "${gnome_to_install[@]}"
-            fi
         fi
     fi
     
@@ -621,7 +793,8 @@ cmd_update() {
     # Update state
     save_state
     
-    print_success "Update complete!"
+    # Print summary
+    print_summary
 }
 
 # Status command

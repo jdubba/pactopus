@@ -150,7 +150,14 @@ install_special_package() {
         nvm)
             if [[ ! -d "$HOME/.nvm" ]]; then
                 print_info "Installing NVM..."
-                curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
+                # Fetch the latest version from GitHub releases
+                NVM_LATEST=$(curl -s https://api.github.com/repos/nvm-sh/nvm/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+                if [[ -z "$NVM_LATEST" ]]; then
+                    print_error "Failed to fetch latest NVM version, using fallback"
+                    NVM_LATEST="v0.40.1"  # Fallback to a known recent version
+                fi
+                print_info "Installing NVM version $NVM_LATEST..."
+                curl -o- "https://raw.githubusercontent.com/nvm-sh/nvm/$NVM_LATEST/install.sh" | bash
             else
                 print_info "NVM already installed"
             fi

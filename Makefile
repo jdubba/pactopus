@@ -43,6 +43,9 @@ install: check
 	@if [ -f gnome-packages.conf ]; then \
 		cp gnome-packages.conf $(ETCDIR)/gnome-packages.conf; \
 	fi
+	@if [ -f gnome-extensions.conf ]; then \
+		cp gnome-extensions.conf $(ETCDIR)/gnome-extensions.conf; \
+	fi
 	@echo "Installing user scripts to $(SHAREBIN)..."
 	@for script in $(USERDIR)/*; do \
 		if [ -f "$$script" ]; then \

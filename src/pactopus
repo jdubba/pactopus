@@ -405,7 +405,8 @@ install_special_package() {
         brave-browser)
             if ! command -v brave-browser &> /dev/null; then
                 print_info "Installing Brave Browser..."
-                if sudo dnf config-manager --add-repo https://brave-browser-rpm-release.s3.brave.com/brave-browser.repo 2>/dev/null && \
+                # Download repo file directly (compatible with DNF4 and DNF5)
+                if sudo curl -fsSL https://brave-browser-rpm-release.s3.brave.com/brave-browser.repo -o /etc/yum.repos.d/brave-browser.repo 2>/dev/null && \
                    sudo rpm --import https://brave-browser-rpm-release.s3.brave.com/brave-core.asc 2>/dev/null && \
                    sudo dnf install -y brave-browser 2>/dev/null; then
                     track_success "$package"
@@ -413,6 +414,14 @@ install_special_package() {
                 else
                     track_failure "$package" "Failed to configure repository or install Brave Browser"
                     print_error "Failed to install Brave Browser"
+                    # Provide more detailed error information
+                    if [[ ! -f /etc/yum.repos.d/brave-browser.repo ]]; then
+                        print_error "Failed to download Brave repository file"
+                    elif ! rpm -q gpg-pubkey-$(sudo rpm -q --qf "%{version}-%{release}\n" gpg-pubkey | grep -i brave 2>/dev/null) &>/dev/null; then
+                        print_error "Failed to import Brave GPG key"
+                    else
+                        print_error "Failed to install brave-browser package from repository"
+                    fi
                 fi
             else
                 print_info "Brave Browser already installed"

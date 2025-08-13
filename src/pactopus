@@ -420,39 +420,6 @@ install_special_package() {
             fi
             ;;
             
-        gnome-shell-extension-pop-shell)
-            if [[ ! -d "$HOME/.local/share/gnome-shell/extensions/pop-shell@system76.com" ]]; then
-                print_info "Installing Pop Shell GNOME extension..."
-                
-                # Install dependencies first
-                if ! sudo dnf install -y gnome-shell-extension-native-window-placement xprop 2>/dev/null; then
-                    track_failure "$package" "Failed to install dependencies"
-                    print_error "Failed to install Pop Shell dependencies"
-                else
-                    # Clone and build Pop Shell
-                    TEMP_DIR=$(mktemp -d)
-                    (
-                        cd "$TEMP_DIR"
-                        if git clone https://github.com/pop-os/shell.git 2>/dev/null && \
-                           cd shell && \
-                           make local-install 2>/dev/null; then
-                            track_success "$package"
-                            print_success "Pop Shell installed successfully"
-                            print_info "Please restart GNOME Shell (Alt+F2, then 'r') and enable in Extensions app"
-                        else
-                            track_failure "$package" "Failed to build or install Pop Shell"
-                            print_error "Failed to install Pop Shell"
-                        fi
-                    )
-                    cd - > /dev/null
-                    rm -rf "$TEMP_DIR"
-                fi
-            else
-                print_info "Pop Shell already installed"
-                track_skipped "$package"
-            fi
-            ;;
-            
         *)
             track_failure "$package" "Unknown special package"
             print_warning "Unknown special package: $package"

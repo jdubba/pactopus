@@ -312,7 +312,22 @@ install_gnome_extension() {
     # Check if extension is already installed
     if [[ -d "$HOME/.local/share/gnome-shell/extensions/$uuid" ]]; then
         print_info "$name already installed"
-        track_skipped "$name"
+        track_skipped "$name" "Already installed"
+        
+        # Check if extension is enabled
+        if gnome-extensions list --enabled 2>/dev/null | grep -q "$uuid"; then
+            print_info "$name is already enabled"
+        else
+            print_info "Enabling previously installed extension: $name..."
+            log_command "gnome-extensions enable $uuid"
+            if gnome-extensions enable "$uuid" 2>/dev/null; then
+                log_command "gnome-extensions enable $uuid" "success"
+                print_success "$name enabled successfully"
+            else
+                log_command "gnome-extensions enable $uuid" "failed"
+                print_warning "Failed to enable $name. You can enable it manually using GNOME Extensions app"
+            fi
+        fi
         return 0
     fi
     
@@ -370,7 +385,17 @@ install_gnome_extension() {
            unzip -q extension.zip -d "$HOME/.local/share/gnome-shell/extensions/$uuid" 2>/dev/null; then
             track_success "$name"
             print_success "$name installed successfully"
-            print_info "Enable the extension using GNOME Extensions app or gnome-extensions command"
+            
+            # Enable the extension
+            print_info "Enabling extension: $name..."
+            log_command "gnome-extensions enable $uuid"
+            if gnome-extensions enable "$uuid" 2>/dev/null; then
+                log_command "gnome-extensions enable $uuid" "success"
+                print_success "$name enabled successfully"
+            else
+                log_command "gnome-extensions enable $uuid" "failed"
+                print_warning "Failed to enable $name automatically. You can enable it manually using GNOME Extensions app"
+            fi
         else
             track_failure "$name" "Failed to download or extract extension"
             print_error "Failed to install $name"

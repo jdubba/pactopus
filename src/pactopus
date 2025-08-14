@@ -17,6 +17,12 @@ DOTFILES_REPO="https://github.com/jdubba/dotfiles.git"
 UTILITIES_DIR="$HOME/source/utilities"
 UTILITIES_REPO="https://github.com/jdubba/utilities.git"
 
+# Logging configuration
+LOG_DIR="$HOME/.local/var"
+LOG_FILE="$LOG_DIR/pactopus.log"
+LOG_FILE_OLD="$LOG_DIR/pactopus.log.old"
+MAX_LOG_SIZE=$((25 * 1024 * 1024))  # 25 MiB in bytes
+
 # Installation tracking arrays
 declare -a SUCCESSFUL_INSTALLS=()
 declare -a FAILED_INSTALLS=()
@@ -29,39 +35,111 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Initialize logging
+init_logging() {
+    # Create log directory if it doesn't exist
+    if [[ ! -d "$LOG_DIR" ]]; then
+        mkdir -p "$LOG_DIR"
+    fi
+    
+    # Rotate log if it exceeds max size
+    rotate_log_if_needed
+    
+    # Log initial session start
+    log_entry "INFO" "Pactopus session started"
+    log_entry "INFO" "Command: pactopus $*"
+}
+
+# Get current timestamp
+get_timestamp() {
+    date '+%Y-%m-%d %H:%M:%S'
+}
+
+# Rotate log file if it exceeds max size
+rotate_log_if_needed() {
+    if [[ -f "$LOG_FILE" ]]; then
+        local log_size
+        log_size=$(stat -c%s "$LOG_FILE" 2>/dev/null || stat -f%z "$LOG_FILE" 2>/dev/null || echo 0)
+        
+        if [[ $log_size -gt $MAX_LOG_SIZE ]]; then
+            # Move current log to .old (overwriting any existing .old file)
+            mv -f "$LOG_FILE" "$LOG_FILE_OLD"
+            
+            # Log rotation event in new log file
+            echo "[$(get_timestamp)] [INFO] Log rotated - previous log moved to $LOG_FILE_OLD" >> "$LOG_FILE"
+        fi
+    fi
+}
+
+# Write log entry
+log_entry() {
+    local level="$1"
+    local message="$2"
+    local timestamp
+    timestamp=$(get_timestamp)
+    
+    # Ensure log directory exists
+    [[ -d "$LOG_DIR" ]] || mkdir -p "$LOG_DIR"
+    
+    # Write to log file
+    echo "[$timestamp] [$level] $message" >> "$LOG_FILE"
+    
+    # Check if rotation is needed after write
+    rotate_log_if_needed
+}
+
+# Log command execution
+log_command() {
+    local command="$1"
+    local status="$2"
+    
+    if [[ -n "$status" ]]; then
+        log_entry "CMD" "Command executed: $command (status: $status)"
+    else
+        log_entry "CMD" "Executing command: $command"
+    fi
+}
+
 # Print colored output
 print_info() {
     echo -e "${BLUE}[INFO]${NC} $1"
+    log_entry "INFO" "$1"
 }
 
 print_success() {
     echo -e "${GREEN}[SUCCESS]${NC} $1"
+    log_entry "SUCCESS" "$1"
 }
 
 print_warning() {
     echo -e "${YELLOW}[WARNING]${NC} $1"
+    log_entry "WARNING" "$1"
 }
 
 print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
+    log_entry "ERROR" "$1"
 }
 
 # Track installation results
 track_success() {
     local package="$1"
     SUCCESSFUL_INSTALLS+=("$package")
+    log_entry "TRACK" "Package marked as successful: $package"
 }
 
 track_failure() {
     local package="$1"
     local reason="${2:-Unknown error}"
     FAILED_INSTALLS+=("$package: $reason")
+    log_entry "TRACK" "Package marked as failed: $package - Reason: $reason"
 }
 
 track_skipped() {
     local package="$1"
     local reason="${2:-Already installed}"
     SKIPPED_INSTALLS+=("$package: $reason")
+    log_entry "TRACK" "Package marked as skipped: $package - Reason: $reason"
 }
 
 # Print installation summary
@@ -337,10 +415,13 @@ install_special_package() {
         starship)
             if ! command -v starship &> /dev/null; then
                 print_info "Installing Starship prompt..."
+                log_command "curl -sS https://starship.rs/install.sh | sh -s -- -y"
                 if curl -sS https://starship.rs/install.sh | sh -s -- -y 2>/dev/null; then
+                    log_command "curl -sS https://starship.rs/install.sh | sh -s -- -y" "success"
                     track_success "$package"
                     print_success "Starship installed successfully"
                 else
+                    log_command "curl -sS https://starship.rs/install.sh | sh -s -- -y" "failed"
                     track_failure "$package" "Failed to download or install Starship"
                     print_error "Failed to install Starship"
                 fi
@@ -360,10 +441,13 @@ install_special_package() {
                     NVM_LATEST="v0.40.1"  # Fallback to a known recent version
                 fi
                 print_info "Installing NVM version $NVM_LATEST..."
+                log_command "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/$NVM_LATEST/install.sh | bash"
                 if curl -o- "https://raw.githubusercontent.com/nvm-sh/nvm/$NVM_LATEST/install.sh" 2>/dev/null | bash 2>/dev/null; then
+                    log_command "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/$NVM_LATEST/install.sh | bash" "success"
                     track_success "$package"
                     print_success "NVM installed successfully"
                 else
+                    log_command "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/$NVM_LATEST/install.sh | bash" "failed"
                     track_failure "$package" "Failed to install NVM version $NVM_LATEST"
                     print_error "Failed to install NVM"
                 fi
@@ -569,9 +653,12 @@ install_dotfiles() {
     
     if [[ ! -d "$DOTFILES_DIR" ]]; then
         print_info "Cloning dotfiles repository..."
+        log_command "git clone $DOTFILES_REPO $DOTFILES_DIR"
         if git clone "$DOTFILES_REPO" "$DOTFILES_DIR" 2>/dev/null; then
+            log_command "git clone $DOTFILES_REPO $DOTFILES_DIR" "success"
             print_success "Dotfiles repository cloned successfully"
         else
+            log_command "git clone $DOTFILES_REPO $DOTFILES_DIR" "failed"
             track_failure "dotfiles" "Failed to clone repository"
             print_error "Failed to clone dotfiles repository"
             return 0
@@ -580,9 +667,12 @@ install_dotfiles() {
         print_info "Updating dotfiles repository..."
         (
             cd "$DOTFILES_DIR"
+            log_command "git pull (in $DOTFILES_DIR)"
             if git pull 2>/dev/null; then
+                log_command "git pull (in $DOTFILES_DIR)" "success"
                 print_success "Dotfiles repository updated successfully"
             else
+                log_command "git pull (in $DOTFILES_DIR)" "failed"
                 print_warning "Failed to update dotfiles repository"
             fi
         )
@@ -684,7 +774,9 @@ cmd_install() {
     
     # Update system first
     print_info "Updating package database..."
+    log_command "sudo dnf check-update"
     sudo dnf check-update || true
+    log_command "sudo dnf check-update" "completed"
     
     # Parse packages
     IFS=$'\n' read -d '' -r -a package_data < <(get_packages && printf '\0')
@@ -709,10 +801,13 @@ cmd_install() {
         for pkg in "${pkgs[@]}"; do
             if ! rpm -q "$pkg" &>/dev/null; then
                 print_info "Installing $pkg..."
+                log_command "sudo dnf install -y $pkg"
                 if sudo dnf install -y "$pkg" 2>/dev/null; then
+                    log_command "sudo dnf install -y $pkg" "success"
                     track_success "$pkg"
                     print_success "$pkg installed successfully"
                 else
+                    log_command "sudo dnf install -y $pkg" "failed"
                     track_failure "$pkg" "DNF installation failed"
                     print_error "Failed to install $pkg"
                 fi
@@ -726,6 +821,7 @@ cmd_install() {
     # Install GNOME regular packages if in GNOME environment
     if is_gnome_environment; then
         print_info "GNOME desktop detected. Installing GNOME-specific packages..."
+        log_entry "INFO" "GNOME environment detected - processing GNOME packages"
         
         # Parse GNOME packages
         IFS=$'\n' read -d '' -r -a gnome_package_data < <(get_gnome_packages && printf '\0')
@@ -745,10 +841,13 @@ cmd_install() {
             for pkg in "${gnome_pkgs[@]}"; do
                 if ! rpm -q "$pkg" &>/dev/null; then
                     print_info "Installing GNOME package $pkg..."
+                    log_command "sudo dnf install -y $pkg"
                     if sudo dnf install -y "$pkg" 2>/dev/null; then
+                        log_command "sudo dnf install -y $pkg" "success"
                         track_success "$pkg"
                         print_success "$pkg installed successfully"
                     else
+                        log_command "sudo dnf install -y $pkg" "failed"
                         track_failure "$pkg" "DNF installation failed"
                         print_error "Failed to install $pkg"
                     fi
@@ -800,9 +899,12 @@ cmd_install() {
     # Run full system update
     echo ""
     print_info "Running full system update to ensure all packages are up to date..."
+    log_command "sudo dnf upgrade -y"
     if sudo dnf upgrade -y 2>/dev/null; then
+        log_command "sudo dnf upgrade -y" "success"
         print_success "System update completed successfully"
     else
+        log_command "sudo dnf upgrade -y" "failed"
         print_warning "System update encountered issues - please review any errors above"
     fi
     
@@ -846,7 +948,9 @@ cmd_update() {
     SKIPPED_INSTALLS=()
     
     print_info "Updating all packages..."
+    log_command "sudo dnf upgrade -y"
     sudo dnf upgrade -y
+    log_command "sudo dnf upgrade -y" "completed"
     
     # Re-run package installation to catch any missing packages
     print_info "Checking for missing packages..."
@@ -870,10 +974,13 @@ cmd_update() {
         for pkg in "${pkgs[@]}"; do
             if ! rpm -q "$pkg" &>/dev/null; then
                 print_info "Installing missing package $pkg..."
+                log_command "sudo dnf install -y $pkg"
                 if sudo dnf install -y "$pkg" 2>/dev/null; then
+                    log_command "sudo dnf install -y $pkg" "success"
                     track_success "$pkg"
                     print_success "$pkg installed successfully"
                 else
+                    log_command "sudo dnf install -y $pkg" "failed"
                     track_failure "$pkg" "DNF installation failed"
                     print_error "Failed to install $pkg"
                 fi
@@ -902,10 +1009,13 @@ cmd_update() {
             for pkg in "${gnome_pkgs[@]}"; do
                 if ! rpm -q "$pkg" &>/dev/null; then
                     print_info "Installing missing GNOME package $pkg..."
+                    log_command "sudo dnf install -y $pkg"
                     if sudo dnf install -y "$pkg" 2>/dev/null; then
+                        log_command "sudo dnf install -y $pkg" "success"
                         track_success "$pkg"
                         print_success "$pkg installed successfully"
                     else
+                        log_command "sudo dnf install -y $pkg" "failed"
                         track_failure "$pkg" "DNF installation failed"
                         print_error "Failed to install $pkg"
                     fi
@@ -1097,6 +1207,9 @@ cmd_version() {
 
 # Main script
 main() {
+    # Initialize logging
+    init_logging "$@"
+    
     case "${1:-help}" in
         install)
             cmd_install
@@ -1119,9 +1232,13 @@ main() {
         *)
             print_error "Unknown command: $1"
             cmd_help
+            log_entry "INFO" "Pactopus session ended with error - unknown command"
             exit 1
             ;;
     esac
+    
+    # Log session end
+    log_entry "INFO" "Pactopus session ended successfully"
 }
 
 main "$@"

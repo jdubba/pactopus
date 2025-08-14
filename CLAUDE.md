@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Pactopus is a cross-distribution personal package management DSC (Desired State Configuration) tool designed to standardize tool sets across multiple Linux machines and environments. It manages installation and configuration of software packages as composable sets, supports user-defined tools, and integrates with dotfiles management.
+Pactopus is a cross-distribution personal package management DSC (Desired State Configuration) tool designed to standardize tool sets across multiple Linux machines and environments. It manages installation and configuration of software packages as composable sets and integrates with dotfiles management.
 
 ## Architecture
 
@@ -13,7 +13,6 @@ The project is designed as a CLI bash utility with the following key components:
 1. **Main CLI**: `pactopus` command with structure `pactopus [COMMAND] <OPTIONS> arguments`
 2. **Backend**: Ansible playbooks for package installation across different distributions
 3. **Configuration Storage**: Package tracking in `$XDG_CONFIG_HOME/pactopus/`
-4. **User Tools**: Custom utilities stored in `/bin` and `/lib` folders, installed to `$HOME/.local/share/pactopus` and symlinked to `$HOME/.local/bin/`
 
 ## Supported Platforms
 
@@ -65,4 +64,3 @@ When implementing new features:
 1. Test across multiple distribution families (Debian-based, RHEL-based, Arch, SUSE)
 2. Verify idempotency of install/update operations
 3. Check package name mappings work correctly
-4. Ensure user tools are properly installed and symlinked

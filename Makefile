@@ -4,10 +4,7 @@
 PREFIX ?= $(HOME)/.local
 BINDIR = $(PREFIX)/bin
 ETCDIR = $(PREFIX)/etc/pactopus
-SHAREDIR = $(PREFIX)/share/pactopus
-SHAREBIN = $(SHAREDIR)/bin
 SRCDIR = src
-USERDIR = $(SRCDIR)/user
 
 # Main executable
 EXECUTABLE = pactopus
@@ -22,19 +19,12 @@ all: check
 check:
 	@echo "Checking bash script syntax..."
 	@bash -n $(SRCDIR)/$(EXECUTABLE)
-	@for script in $(USERDIR)/*; do \
-		if [ -f "$$script" ]; then \
-			echo "Checking $$script..."; \
-			bash -n "$$script"; \
-		fi; \
-	done
 	@echo "Syntax check passed!"
 
 # Install the executable
 install: check
 	@echo "Installing pactopus to $(BINDIR)..."
 	@mkdir -p $(BINDIR)
-	@mkdir -p $(SHAREBIN)
 	@mkdir -p $(ETCDIR)
 	@cp $(SRCDIR)/$(EXECUTABLE) $(BINDIR)/$(EXECUTABLE)
 	@chmod +x $(BINDIR)/$(EXECUTABLE)
@@ -46,16 +36,6 @@ install: check
 	@if [ -f gnome-extensions.conf ]; then \
 		cp gnome-extensions.conf $(ETCDIR)/gnome-extensions.conf; \
 	fi
-	@echo "Installing user scripts to $(SHAREBIN)..."
-	@for script in $(USERDIR)/*; do \
-		if [ -f "$$script" ]; then \
-			scriptname=$$(basename "$$script"); \
-			echo "Installing $$scriptname..."; \
-			cp "$$script" "$(SHAREBIN)/$$scriptname"; \
-			chmod +x "$(SHAREBIN)/$$scriptname"; \
-			ln -sf "$(SHAREBIN)/$$scriptname" "$(BINDIR)/$$scriptname"; \
-		fi; \
-	done
 	@echo "Installation complete!"
 	@echo "Make sure $(BINDIR) is in your PATH"
 
@@ -63,16 +43,6 @@ install: check
 uninstall:
 	@echo "Removing pactopus from $(BINDIR)..."
 	@rm -f $(BINDIR)/$(EXECUTABLE)
-	@echo "Removing user scripts..."
-	@for script in $(USERDIR)/*; do \
-		if [ -f "$$script" ]; then \
-			scriptname=$$(basename "$$script"); \
-			echo "Removing $$scriptname..."; \
-			rm -f "$(BINDIR)/$$scriptname"; \
-		fi; \
-	done
-	@echo "Removing $(SHAREDIR)..."
-	@rm -rf $(SHAREDIR)
 	@echo "Removing $(ETCDIR)..."
 	@rm -rf $(ETCDIR)
 	@echo "Uninstall complete!"
@@ -98,12 +68,6 @@ lint:
 	@echo "Running shellcheck..."
 	@if command -v shellcheck >/dev/null 2>&1; then \
 		shellcheck $(SRCDIR)/$(EXECUTABLE); \
-		for script in $(USERDIR)/*; do \
-			if [ -f "$$script" ]; then \
-				echo "Linting $$script..."; \
-				shellcheck "$$script"; \
-			fi; \
-		done; \
 		echo "Lint check passed!"; \
 	else \
 		echo "shellcheck not installed. Skipping lint check."; \

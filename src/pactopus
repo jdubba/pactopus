@@ -681,6 +681,57 @@ install_special_package() {
             fi
             ;;
             
+        pipx)
+            if ! command -v pipx &> /dev/null; then
+                print_info "Installing pipx..."
+                # First try to install via dnf
+                log_command "sudo dnf install -y pipx"
+                if sudo dnf install -y pipx 2>/dev/null; then
+                    log_command "sudo dnf install -y pipx" "success"
+                    track_success "$package"
+                    print_success "pipx installed successfully via dnf"
+                else
+                    log_command "sudo dnf install -y pipx" "failed"
+                    print_info "pipx not available via dnf, installing via pip..."
+                    
+                    # Ensure pip is installed
+                    if ! command -v pip3 &> /dev/null; then
+                        print_error "pip3 is required to install pipx. Please install python3-pip first."
+                        track_failure "$package" "pip3 not available"
+                    else
+                        # Install pipx via pip in user space
+                        log_command "python3 -m pip install --user pipx"
+                        if python3 -m pip install --user pipx 2>/dev/null; then
+                            log_command "python3 -m pip install --user pipx" "success"
+                            
+                            # Ensure pipx bin directory is added to PATH
+                            PIPX_BIN_DIR="$HOME/.local/bin"
+                            if [[ ":$PATH:" != *":$PIPX_BIN_DIR:"* ]]; then
+                                print_info "Adding $PIPX_BIN_DIR to PATH..."
+                                print_info "You may need to restart your shell or run: export PATH=\"\$PATH:$PIPX_BIN_DIR\""
+                            fi
+                            
+                            # Run pipx ensurepath to set up PATH properly
+                            if python3 -m pipx ensurepath 2>/dev/null; then
+                                print_success "pipx installed successfully via pip"
+                                track_success "$package"
+                            else
+                                print_warning "pipx installed but PATH setup may be incomplete"
+                                track_success "$package"
+                            fi
+                        else
+                            log_command "python3 -m pip install --user pipx" "failed"
+                            track_failure "$package" "Failed to install via pip"
+                            print_error "Failed to install pipx via pip"
+                        fi
+                    fi
+                fi
+            else
+                print_info "pipx already installed"
+                track_skipped "$package"
+            fi
+            ;;
+            
         *)
             track_failure "$package" "Unknown special package"
             print_warning "Unknown special package: $package"

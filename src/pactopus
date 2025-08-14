@@ -229,7 +229,9 @@ get_packages() {
     local packages=()
     local special_packages=()
     
-    while IFS= read -r line; do
+    log_entry "INFO" "Parsing packages from $CONFIG_FILE"
+    
+    while IFS= read -r line || [[ -n "$line" ]]; do
         # Skip comments and empty lines
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
         [[ -z "${line// }" ]] && continue
@@ -246,6 +248,10 @@ get_packages() {
         fi
     done < "$CONFIG_FILE"
     
+    log_entry "INFO" "Found ${#packages[@]} regular packages and ${#special_packages[@]} special packages in $CONFIG_FILE"
+    log_entry "DEBUG" "Regular packages: ${packages[*]}"
+    log_entry "DEBUG" "Special packages: ${special_packages[*]}"
+    
     echo "REGULAR:${packages[*]}"
     echo "SPECIAL:${special_packages[*]}"
 }
@@ -257,10 +263,13 @@ get_gnome_packages() {
     
     # Only process if GNOME config file exists
     if [[ ! -f "$GNOME_CONFIG_FILE" ]]; then
+        log_entry "INFO" "GNOME config file not found: $GNOME_CONFIG_FILE"
         return 0
     fi
     
-    while IFS= read -r line; do
+    log_entry "INFO" "Parsing GNOME packages from $GNOME_CONFIG_FILE"
+    
+    while IFS= read -r line || [[ -n "$line" ]]; do
         # Skip comments and empty lines
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
         [[ -z "${line// }" ]] && continue
@@ -277,6 +286,10 @@ get_gnome_packages() {
         fi
     done < "$GNOME_CONFIG_FILE"
     
+    log_entry "INFO" "Found ${#packages[@]} regular GNOME packages and ${#special_packages[@]} special GNOME packages"
+    log_entry "DEBUG" "Regular GNOME packages: ${packages[*]}"
+    log_entry "DEBUG" "Special GNOME packages: ${special_packages[*]}"
+    
     echo "REGULAR:${packages[*]}"
     echo "SPECIAL:${special_packages[*]}"
 }
@@ -287,10 +300,13 @@ get_gnome_extensions() {
     
     # Only process if GNOME extensions config file exists
     if [[ ! -f "$GNOME_EXTENSIONS_FILE" ]]; then
+        log_entry "INFO" "GNOME extensions config file not found: $GNOME_EXTENSIONS_FILE"
         return 0
     fi
     
-    while IFS= read -r line; do
+    log_entry "INFO" "Parsing GNOME extensions from $GNOME_EXTENSIONS_FILE"
+    
+    while IFS= read -r line || [[ -n "$line" ]]; do
         # Skip comments and empty lines
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
         [[ -z "${line// }" ]] && continue
@@ -298,6 +314,8 @@ get_gnome_extensions() {
         # Extract extension info (format: uuid|id|name)
         extensions+=("$line")
     done < "$GNOME_EXTENSIONS_FILE"
+    
+    log_entry "INFO" "Found ${#extensions[@]} GNOME extensions to install"
     
     printf '%s\n' "${extensions[@]}"
 }

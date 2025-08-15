@@ -732,6 +732,57 @@ install_special_package() {
             fi
             ;;
             
+        gext)
+            if ! command -v gext &> /dev/null; then
+                print_info "Installing gnome-extensions-cli (gext)..."
+                
+                # Ensure pipx is installed first
+                if ! command -v pipx &> /dev/null; then
+                    print_info "pipx is required for gext, installing pipx first..."
+                    # Install pipx using the same logic as above
+                    log_command "sudo dnf install -y pipx"
+                    if ! sudo dnf install -y pipx 2>/dev/null; then
+                        log_command "sudo dnf install -y pipx" "failed"
+                        # Try pip fallback
+                        if command -v pip3 &> /dev/null; then
+                            log_command "python3 -m pip install --user pipx"
+                            if ! python3 -m pip install --user pipx 2>/dev/null; then
+                                log_command "python3 -m pip install --user pipx" "failed"
+                                track_failure "$package" "Failed to install pipx (required for gext)"
+                                print_error "Failed to install pipx, which is required for gext"
+                                return 0
+                            fi
+                            log_command "python3 -m pip install --user pipx" "success"
+                            python3 -m pipx ensurepath 2>/dev/null
+                        else
+                            track_failure "$package" "pipx and pip3 not available"
+                            print_error "pipx is required for gext but couldn't be installed"
+                            return 0
+                        fi
+                    else
+                        log_command "sudo dnf install -y pipx" "success"
+                    fi
+                fi
+                
+                # Install gext using pipx
+                print_info "Installing gext via pipx..."
+                log_command "pipx install gnome-extensions-cli"
+                if pipx install gnome-extensions-cli 2>/dev/null; then
+                    log_command "pipx install gnome-extensions-cli" "success"
+                    track_success "$package"
+                    print_success "gnome-extensions-cli (gext) installed successfully"
+                    print_info "You can now use 'gext' command to manage GNOME extensions"
+                else
+                    log_command "pipx install gnome-extensions-cli" "failed"
+                    track_failure "$package" "Failed to install via pipx"
+                    print_error "Failed to install gnome-extensions-cli via pipx"
+                fi
+            else
+                print_info "gext already installed"
+                track_skipped "$package"
+            fi
+            ;;
+            
         *)
             track_failure "$package" "Unknown special package"
             print_warning "Unknown special package: $package"

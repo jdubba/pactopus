@@ -318,30 +318,31 @@ get_gnome_extensions() {
     printf '%s\n' "${extensions[@]}"
 }
 
-# Install GNOME Shell extension
+# Install GNOME Shell extension using gext
 install_gnome_extension() {
     local extension_info="$1"
     
     # Parse extension info
     IFS='|' read -r uuid extension_id name <<< "$extension_info"
     
-    # Check if extension is already installed
-    if [[ -d "$HOME/.local/share/gnome-shell/extensions/$uuid" ]]; then
+    # Check if extension is already installed using gext
+    print_info "Checking if $name is installed..."
+    if gext list --installed 2>/dev/null | grep -q "$uuid"; then
         print_info "$name already installed"
         track_skipped "$name" "Already installed"
         
         # Check if extension is enabled
-        if gnome-extensions list --enabled 2>/dev/null | grep -q "$uuid"; then
+        if gext list --enabled 2>/dev/null | grep -q "$uuid"; then
             print_info "$name is already enabled"
         else
             print_info "Enabling previously installed extension: $name..."
-            log_command "gnome-extensions enable $uuid"
-            if gnome-extensions enable "$uuid" 2>/dev/null; then
-                log_command "gnome-extensions enable $uuid" "success"
+            log_command "gext enable $uuid"
+            if gext enable "$uuid" 2>/dev/null; then
+                log_command "gext enable $uuid" "success"
                 print_success "$name enabled successfully"
             else
-                log_command "gnome-extensions enable $uuid" "failed"
-                print_warning "Failed to enable $name. You can enable it manually using GNOME Extensions app"
+                log_command "gext enable $uuid" "failed"
+                print_warning "Failed to enable $name. You can enable it manually using GNOME Extensions app or 'gext enable $uuid'"
             fi
         fi
         return 0
@@ -349,76 +350,27 @@ install_gnome_extension() {
     
     print_info "Installing GNOME extension: $name..."
     
-    # Get GNOME Shell version
-    GNOME_VERSION=$(gnome-shell --version | grep -oP '\d+\.\d+' | head -1)
-    if [[ -z "$GNOME_VERSION" ]]; then
-        track_failure "$name" "Unable to determine GNOME Shell version"
-        print_error "Unable to determine GNOME Shell version"
-        return 1
-    fi
-    
-    # Create extensions directory if it doesn't exist
-    mkdir -p "$HOME/.local/share/gnome-shell/extensions"
-    
-    # Download extension metadata
-    TEMP_DIR=$(mktemp -d)
-    (
-        cd "$TEMP_DIR"
+    # Install extension using gext (it automatically handles version compatibility and enabling)
+    log_command "gext install $uuid"
+    if gext install "$uuid" 2>&1 | tee /tmp/gext_install_$$.log | grep -q -E "(Successfully installed|is now enabled)"; then
+        log_command "gext install $uuid" "success"
+        track_success "$name"
+        print_success "$name installed and enabled successfully"
+        rm -f /tmp/gext_install_$$.log
+    else
+        log_command "gext install $uuid" "failed"
         
-        # Get extension info from GNOME extensions API
-        API_URL="https://extensions.gnome.org/extension-info/?pk=$extension_id&shell_version=$GNOME_VERSION"
-        
-        if ! curl -s "$API_URL" -o extension_info.json 2>/dev/null; then
-            track_failure "$name" "Failed to fetch extension info from API"
-            print_error "Failed to fetch extension info for $name"
-            cd - > /dev/null
-            rm -rf "$TEMP_DIR"
-            return 1
-        fi
-        
-        # Check if extension supports this GNOME version
-        if grep -q '"error"' extension_info.json 2>/dev/null; then
-            track_failure "$name" "Extension doesn't support GNOME Shell $GNOME_VERSION"
-            print_error "$name doesn't support GNOME Shell $GNOME_VERSION"
-            cd - > /dev/null
-            rm -rf "$TEMP_DIR"
-            return 1
-        fi
-        
-        # Get download URL
-        DOWNLOAD_URL=$(grep -oP '"download_url"\s*:\s*"[^"]+' extension_info.json | cut -d'"' -f4)
-        
-        if [[ -z "$DOWNLOAD_URL" ]]; then
-            track_failure "$name" "Failed to get download URL"
-            print_error "Failed to get download URL for $name"
-            cd - > /dev/null
-            rm -rf "$TEMP_DIR"
-            return 1
-        fi
-        
-        # Download and extract extension
-        if curl -L "https://extensions.gnome.org$DOWNLOAD_URL" -o extension.zip 2>/dev/null && \
-           unzip -q extension.zip -d "$HOME/.local/share/gnome-shell/extensions/$uuid" 2>/dev/null; then
-            track_success "$name"
-            print_success "$name installed successfully"
-            
-            # Enable the extension
-            print_info "Enabling extension: $name..."
-            log_command "gnome-extensions enable $uuid"
-            if gnome-extensions enable "$uuid" 2>/dev/null; then
-                log_command "gnome-extensions enable $uuid" "success"
-                print_success "$name enabled successfully"
-            else
-                log_command "gnome-extensions enable $uuid" "failed"
-                print_warning "Failed to enable $name automatically. You can enable it manually using GNOME Extensions app"
-            fi
+        # Check if it failed due to version compatibility
+        if grep -q "not compatible" /tmp/gext_install_$$.log 2>/dev/null; then
+            track_failure "$name" "Not compatible with current GNOME Shell version"
+            print_error "$name is not compatible with your GNOME Shell version"
         else
-            track_failure "$name" "Failed to download or extract extension"
+            track_failure "$name" "Installation failed"
             print_error "Failed to install $name"
+            print_info "You can try manually with: gext install $uuid"
         fi
-    )
-    cd - > /dev/null
-    rm -rf "$TEMP_DIR"
+        rm -f /tmp/gext_install_$$.log
+    fi
 }
 
 # Install all GNOME extensions
@@ -427,13 +379,14 @@ install_gnome_extensions() {
         return 0
     fi
     
-    # Check if gnome-extensions tool is available
-    if ! command -v gnome-extensions &> /dev/null; then
-        print_warning "gnome-extensions command not found. Install gnome-shell to manage extensions."
+    # Check if gext tool is available
+    if ! command -v gext &> /dev/null; then
+        print_warning "gext (gnome-extensions-cli) not found. Extensions will not be installed."
+        print_info "To install extensions, ensure gext is installed (it's in the GNOME packages list)"
         return 0
     fi
     
-    print_info "Installing GNOME Shell extensions..."
+    print_info "Installing GNOME Shell extensions using gext..."
     
     # Get list of extensions
     mapfile -t extensions < <(get_gnome_extensions)
@@ -443,9 +396,20 @@ install_gnome_extensions() {
         return 0
     fi
     
+    # Ensure gext is properly initialized
+    log_command "gext sync"
+    if ! gext sync 2>/dev/null; then
+        log_command "gext sync" "failed"
+        print_warning "Failed to sync gext. Continuing with installation..."
+    else
+        log_command "gext sync" "success"
+    fi
+    
     for extension in "${extensions[@]}"; do
         install_gnome_extension "$extension"
     done
+    
+    print_info "GNOME extensions installation completed"
 }
 
 # Install special packages with custom methods

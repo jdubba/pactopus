@@ -305,12 +305,33 @@ get_gnome_extensions() {
     log_entry "INFO" "Parsing GNOME extensions from $GNOME_EXTENSIONS_FILE"
     
     while IFS= read -r line || [[ -n "$line" ]]; do
-        # Skip comments and empty lines
-        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        # Skip pure comment lines and empty lines
+        [[ "$line" =~ ^[[:space:]]*#[^0-9] ]] && continue
         [[ -z "${line// }" ]] && continue
         
-        # Extract extension info (format: uuid|id|name)
-        extensions+=("$line")
+        # Parse lines with format: numeric_id # Extension Name - Description
+        if [[ "$line" =~ ^[[:space:]]*([0-9]+)[[:space:]]*(#.*)?$ ]]; then
+            local id="${BASH_REMATCH[1]}"
+            local comment="${BASH_REMATCH[2]}"
+            
+            # Extract name from comment if present
+            local name="Extension $id"
+            if [[ -n "$comment" ]]; then
+                # Remove leading # and spaces
+                comment="${comment#\#}"
+                comment="${comment#"${comment%%[![:space:]]*}"}"
+                # Extract name (everything before the dash if present)
+                if [[ "$comment" =~ ^([^-]+) ]]; then
+                    name="${BASH_REMATCH[1]}"
+                    name="${name%"${name##*[![:space:]]}"}"
+                else
+                    name="$comment"
+                fi
+            fi
+            
+            # Store as id|name format
+            extensions+=("$id|$name")
+        fi
     done < "$GNOME_EXTENSIONS_FILE"
     
     log_entry "INFO" "Found ${#extensions[@]} GNOME extensions to install"
@@ -322,54 +343,103 @@ get_gnome_extensions() {
 install_gnome_extension() {
     local extension_info="$1"
     
-    # Parse extension info
-    IFS='|' read -r uuid extension_id name <<< "$extension_info"
+    # Parse extension info (format: id|name)
+    IFS='|' read -r extension_id name <<< "$extension_info"
     
-    # Check if extension is already installed using gext
-    print_info "Checking if $name is installed..."
-    if gext list --installed 2>/dev/null | grep -q "$uuid"; then
-        print_info "$name already installed"
+    print_info "Processing extension: $name (ID: $extension_id)..."
+    
+    # First check if extension is already installed by listing all and checking
+    print_info "Checking installed extensions..."
+    
+    # Get detailed info about the extension first
+    log_entry "DEBUG" "Running: gext search $extension_id --json"
+    local search_output
+    search_output=$(gext search "$extension_id" --json 2>&1)
+    log_entry "DEBUG" "Search output: $search_output"
+    
+    # Check if already installed using gext list
+    log_entry "DEBUG" "Running: gext list --installed"
+    local installed_output
+    installed_output=$(gext list --installed 2>&1)
+    log_entry "DEBUG" "Installed extensions: $installed_output"
+    
+    # Check if the extension ID appears in the installed list
+    if echo "$installed_output" | grep -q "$extension_id"; then
+        print_info "$name appears to be already installed"
         track_skipped "$name" "Already installed"
         
         # Check if extension is enabled
-        if gext list --enabled 2>/dev/null | grep -q "$uuid"; then
+        log_entry "DEBUG" "Running: gext list --enabled"
+        local enabled_output
+        enabled_output=$(gext list --enabled 2>&1)
+        log_entry "DEBUG" "Enabled extensions: $enabled_output"
+        
+        if echo "$enabled_output" | grep -q "$extension_id"; then
             print_info "$name is already enabled"
         else
             print_info "Enabling previously installed extension: $name..."
-            log_command "gext enable $uuid"
-            if gext enable "$uuid" 2>/dev/null; then
-                log_command "gext enable $uuid" "success"
+            # Try to enable by numeric ID
+            log_command "gext enable $extension_id"
+            local enable_output
+            enable_output=$(gext enable "$extension_id" 2>&1)
+            log_entry "DEBUG" "Enable output: $enable_output"
+            
+            if [[ $? -eq 0 ]]; then
+                log_command "gext enable $extension_id" "success"
                 print_success "$name enabled successfully"
             else
-                log_command "gext enable $uuid" "failed"
-                print_warning "Failed to enable $name. You can enable it manually using GNOME Extensions app or 'gext enable $uuid'"
+                log_command "gext enable $extension_id" "failed"
+                print_warning "Could not enable $name. You can enable it manually using GNOME Extensions app"
             fi
         fi
         return 0
     fi
     
-    print_info "Installing GNOME extension: $name..."
+    print_info "Installing GNOME extension: $name (ID: $extension_id)..."
     
-    # Install extension using gext (it automatically handles version compatibility and enabling)
-    log_command "gext install $uuid"
-    if gext install "$uuid" 2>&1 | tee /tmp/gext_install_$$.log | grep -q -E "(Successfully installed|is now enabled)"; then
-        log_command "gext install $uuid" "success"
+    # Install extension using numeric ID with verbose output
+    log_command "gext install $extension_id --verbose"
+    local install_log="/tmp/gext_install_${extension_id}_$$.log"
+    local install_output
+    install_output=$(gext install "$extension_id" --verbose 2>&1 | tee "$install_log")
+    local exit_code=$?
+    
+    log_entry "DEBUG" "Install command exit code: $exit_code"
+    log_entry "DEBUG" "Install output: $install_output"
+    
+    # Check exit code first - gext should return 0 on success
+    if [[ $exit_code -eq 0 ]]; then
+        log_command "gext install $extension_id" "success"
         track_success "$name"
-        print_success "$name installed and enabled successfully"
-        rm -f /tmp/gext_install_$$.log
+        print_success "$name installed successfully"
+        rm -f "$install_log"
     else
-        log_command "gext install $uuid" "failed"
-        
-        # Check if it failed due to version compatibility
-        if grep -q "not compatible" /tmp/gext_install_$$.log 2>/dev/null; then
+        # Check for specific error conditions
+        if echo "$install_output" | grep -q -i "not compatible"; then
+            log_command "gext install $extension_id" "failed"
             track_failure "$name" "Not compatible with current GNOME Shell version"
             print_error "$name is not compatible with your GNOME Shell version"
+        elif echo "$install_output" | grep -q -i "already installed"; then
+            # Sometimes gext returns non-zero even when already installed
+            log_command "gext install $extension_id" "success"
+            track_skipped "$name" "Already installed"
+            print_info "$name was already installed"
+        elif echo "$install_output" | grep -q -i "network\|connection\|timeout"; then
+            log_command "gext install $extension_id" "failed"
+            track_failure "$name" "Network error"
+            print_error "Failed to install $name due to network issues"
         else
+            log_command "gext install $extension_id" "failed"
             track_failure "$name" "Installation failed"
             print_error "Failed to install $name"
-            print_info "You can try manually with: gext install $uuid"
+            print_info "Error details: $(tail -n 5 "$install_log" 2>/dev/null | head -n 3)"
+            print_info "You can try manually with: gext install $extension_id"
         fi
-        rm -f /tmp/gext_install_$$.log
+        
+        # Keep log file for debugging on failure
+        if [[ -f "$install_log" ]]; then
+            print_info "Full log saved to: $install_log"
+        fi
     fi
 }
 
@@ -396,13 +466,30 @@ install_gnome_extensions() {
         return 0
     fi
     
-    # Ensure gext is properly initialized
-    log_command "gext sync"
-    if ! gext sync 2>/dev/null; then
+    print_info "Found ${#extensions[@]} extensions to process"
+    
+    # Ensure gext is properly initialized with verbose output
+    log_command "gext sync --verbose"
+    local sync_output
+    sync_output=$(gext sync --verbose 2>&1)
+    local sync_exit=$?
+    log_entry "DEBUG" "gext sync output: $sync_output"
+    
+    if [[ $sync_exit -ne 0 ]]; then
         log_command "gext sync" "failed"
-        print_warning "Failed to sync gext. Continuing with installation..."
+        print_warning "Failed to sync gext (exit code: $sync_exit). Continuing with installation..."
+        print_info "Sync error: $sync_output"
     else
         log_command "gext sync" "success"
+        print_success "GNOME extensions metadata synchronized"
+    fi
+    
+    # Show current GNOME Shell version for debugging
+    local gnome_version
+    gnome_version=$(gnome-shell --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+')
+    if [[ -n "$gnome_version" ]]; then
+        print_info "GNOME Shell version: $gnome_version"
+        log_entry "INFO" "GNOME Shell version detected: $gnome_version"
     fi
     
     for extension in "${extensions[@]}"; do
@@ -410,6 +497,13 @@ install_gnome_extensions() {
     done
     
     print_info "GNOME extensions installation completed"
+    
+    # Show final summary of installed extensions
+    print_info "Final status of extensions:"
+    log_entry "DEBUG" "Running: gext list --enabled"
+    local final_enabled
+    final_enabled=$(gext list --enabled 2>&1)
+    log_entry "DEBUG" "Final enabled extensions: $final_enabled"
 }
 
 # Install special packages with custom methods

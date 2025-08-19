@@ -824,14 +824,14 @@ install_special_package() {
                 
                 # Install gext using pipx
                 print_info "Installing gext via pipx..."
-                log_command "pipx install gnome-extensions-cli"
-                if pipx install gnome-extensions-cli 2>/dev/null; then
-                    log_command "pipx install gnome-extensions-cli" "success"
+                log_command "pipx install gnome-extensions-cli --system-site-packages"
+                if pipx install gnome-extensions-cli --system-site-packages 2>/dev/null; then
+                    log_command "pipx install gnome-extensions-cli --system-site-packages" "success"
                     track_success "$package"
                     print_success "gnome-extensions-cli (gext) installed successfully"
                     print_info "You can now use 'gext' command to manage GNOME extensions"
                 else
-                    log_command "pipx install gnome-extensions-cli" "failed"
+                    log_command "pipx install gnome-extensions-cli --system-site-packages" "failed"
                     track_failure "$package" "Failed to install via pipx"
                     print_error "Failed to install gnome-extensions-cli via pipx"
                 fi

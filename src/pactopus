@@ -352,15 +352,15 @@ install_gnome_extension() {
     print_info "Checking installed extensions..."
     
     # Get detailed info about the extension first
-    log_entry "DEBUG" "Running: gext search $extension_id --json"
+    log_entry "DEBUG" "Running: gext --dbus search $extension_id --json"
     local search_output
-    search_output=$(gext search "$extension_id" --json 2>&1)
+    search_output=$(gext --dbus search "$extension_id" --json 2>&1)
     log_entry "DEBUG" "Search output: $search_output"
     
     # Check if already installed using gext list
-    log_entry "DEBUG" "Running: gext list --installed"
+    log_entry "DEBUG" "Running: gext --dbus list --installed"
     local installed_output
-    installed_output=$(gext list --installed 2>&1)
+    installed_output=$(gext --dbus list --installed 2>&1)
     log_entry "DEBUG" "Installed extensions: $installed_output"
     
     # Check if the extension ID appears in the installed list
@@ -369,9 +369,9 @@ install_gnome_extension() {
         track_skipped "$name" "Already installed"
         
         # Check if extension is enabled
-        log_entry "DEBUG" "Running: gext list --enabled"
+        log_entry "DEBUG" "Running: gext --dbus list --enabled"
         local enabled_output
-        enabled_output=$(gext list --enabled 2>&1)
+        enabled_output=$(gext --dbus list --enabled 2>&1)
         log_entry "DEBUG" "Enabled extensions: $enabled_output"
         
         if echo "$enabled_output" | grep -q "$extension_id"; then
@@ -379,16 +379,16 @@ install_gnome_extension() {
         else
             print_info "Enabling previously installed extension: $name..."
             # Try to enable by numeric ID using D-Bus
-            log_command "gext enable $extension_id --dbus"
+            log_command "gext --dbus enable $extension_id"
             local enable_output
-            enable_output=$(gext enable "$extension_id" --dbus 2>&1)
+            enable_output=$(gext --dbus enable "$extension_id" 2>&1)
             log_entry "DEBUG" "Enable output: $enable_output"
             
             if [[ $? -eq 0 ]]; then
-                log_command "gext enable $extension_id --dbus" "success"
+                log_command "gext --dbus enable $extension_id" "success"
                 print_success "$name enabled successfully"
             else
-                log_command "gext enable $extension_id --dbus" "failed"
+                log_command "gext --dbus enable $extension_id" "failed"
                 print_warning "Could not enable $name. You can enable it manually using GNOME Extensions app"
             fi
         fi
@@ -397,11 +397,11 @@ install_gnome_extension() {
     
     print_info "Installing GNOME extension: $name (ID: $extension_id)..."
     
-    # Install extension using numeric ID with verbose output and D-Bus
-    log_command "gext install $extension_id --verbose --dbus"
+    # Install extension using numeric ID with D-Bus
+    log_command "gext --dbus install $extension_id"
     local install_log="/tmp/gext_install_${extension_id}_$$.log"
     local install_output
-    install_output=$(gext install "$extension_id" --verbose --dbus 2>&1 | tee "$install_log")
+    install_output=$(gext --dbus install "$extension_id" 2>&1 | tee "$install_log")
     local exit_code=$?
     
     log_entry "DEBUG" "Install command exit code: $exit_code"
@@ -409,31 +409,31 @@ install_gnome_extension() {
     
     # Check exit code first - gext should return 0 on success
     if [[ $exit_code -eq 0 ]]; then
-        log_command "gext install $extension_id --verbose --dbus" "success"
+        log_command "gext --dbus install $extension_id" "success"
         track_success "$name"
         print_success "$name installed successfully"
         rm -f "$install_log"
     else
         # Check for specific error conditions
         if echo "$install_output" | grep -q -i "not compatible"; then
-            log_command "gext install $extension_id --verbose --dbus" "failed"
+            log_command "gext --dbus install $extension_id" "failed"
             track_failure "$name" "Not compatible with current GNOME Shell version"
             print_error "$name is not compatible with your GNOME Shell version"
         elif echo "$install_output" | grep -q -i "already installed"; then
             # Sometimes gext returns non-zero even when already installed
-            log_command "gext install $extension_id --verbose --dbus" "success"
+            log_command "gext --dbus install $extension_id" "success"
             track_skipped "$name" "Already installed"
             print_info "$name was already installed"
         elif echo "$install_output" | grep -q -i "network\|connection\|timeout"; then
-            log_command "gext install $extension_id --verbose --dbus" "failed"
+            log_command "gext --dbus install $extension_id" "failed"
             track_failure "$name" "Network error"
             print_error "Failed to install $name due to network issues"
         else
-            log_command "gext install $extension_id --verbose --dbus" "failed"
+            log_command "gext --dbus install $extension_id" "failed"
             track_failure "$name" "Installation failed"
             print_error "Failed to install $name"
             print_info "Error details: $(tail -n 5 "$install_log" 2>/dev/null | head -n 3)"
-            print_info "You can try manually with: gext install $extension_id --dbus"
+            print_info "You can try manually with: gext --dbus install $extension_id"
         fi
         
         # Keep log file for debugging on failure
@@ -468,19 +468,19 @@ install_gnome_extensions() {
     
     print_info "Found ${#extensions[@]} extensions to process"
     
-    # Ensure gext is properly initialized with verbose output using D-Bus
-    log_command "gext sync --verbose --dbus"
+    # Ensure gext is properly initialized using D-Bus
+    log_command "gext --dbus sync"
     local sync_output
-    sync_output=$(gext sync --verbose --dbus 2>&1)
+    sync_output=$(gext --dbus sync 2>&1)
     local sync_exit=$?
     log_entry "DEBUG" "gext sync output: $sync_output"
     
     if [[ $sync_exit -ne 0 ]]; then
-        log_command "gext sync --verbose --dbus" "failed"
+        log_command "gext --dbus sync" "failed"
         print_warning "Failed to sync gext (exit code: $sync_exit). Continuing with installation..."
         print_info "Sync error: $sync_output"
     else
-        log_command "gext sync --verbose --dbus" "success"
+        log_command "gext --dbus sync" "success"
         print_success "GNOME extensions metadata synchronized"
     fi
     
@@ -500,9 +500,9 @@ install_gnome_extensions() {
     
     # Show final summary of installed extensions
     print_info "Final status of extensions:"
-    log_entry "DEBUG" "Running: gext list --enabled"
+    log_entry "DEBUG" "Running: gext --dbus list --enabled"
     local final_enabled
-    final_enabled=$(gext list --enabled 2>&1)
+    final_enabled=$(gext --dbus list --enabled 2>&1)
     log_entry "DEBUG" "Final enabled extensions: $final_enabled"
 }
 
